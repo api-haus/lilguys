@@ -6,6 +6,10 @@ use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug)]
 pub struct Rules {
+    /// Observations one source may contribute to a slice before the rest are dropped. Novelty is
+    /// per key, so a source that mints a fresh key every time — a viewer whose "track" is a
+    /// filename — sails straight through it and floods the slice.
+    pub per_source_cap: usize,
     /// An observation whose key repeats inside this window says nothing new.
     pub novelty_window: Duration,
     /// A focus must hold this long before it is worth a thought.
@@ -26,6 +30,7 @@ impl From<&crate::config::Config> for Rules {
             media_dwell: c.senses.media_dwell,
             thoughts_per_hour: c.mind.turns_per_hour,
             emotes_per_hour: 90.0,
+            per_source_cap: c.senses.per_source_cap,
         }
     }
 }
@@ -38,6 +43,7 @@ impl Default for Rules {
             media_dwell: Duration::from_secs(60),
             thoughts_per_hour: 12.0,
             emotes_per_hour: 90.0,
+            per_source_cap: 3,
         }
     }
 }
@@ -112,6 +118,8 @@ pub struct Attention {
     pub log: VecDeque<Entry>,
     pub counts: [u32; 4],
     fresh: usize,
+    /// How much each source has contributed inside the current novelty window.
+    flood: HashMap<String, (Instant, usize)>,
 }
 
 impl Attention {
@@ -127,6 +135,7 @@ impl Attention {
             log: VecDeque::new(),
             counts: [0; 4],
             fresh: 0,
+            flood: HashMap::new(),
         }
     }
 
@@ -151,6 +160,18 @@ impl Attention {
     }
 
     fn judge(&mut self, what: &Observation, now: Instant) -> Verdict {
+        // A source that talks constantly is damped whatever it says. Without this, one image
+        // viewer announcing every file it opens drowns out the entire desktop.
+        let source = what.source();
+        let seen = self.flood.entry(source).or_insert((now, 0));
+        if now.duration_since(seen.0) > self.rules.novelty_window {
+            *seen = (now, 0);
+        }
+        seen.1 += 1;
+        if seen.1 > self.rules.per_source_cap {
+            return Verdict::Ignored;
+        }
+
         let key = what.key();
         if let Some(prev) = self.seen.get(&key) {
             if now.duration_since(*prev) < self.rules.novelty_window {

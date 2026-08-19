@@ -39,10 +39,12 @@ lilguy voice list               engines present on this machine
 lilguy voice use <engine>       switch, downloading a voice model if it needs one
 lilguy voice test               say a sentence, so the choice is audible not theoretical
 
-lilguy persona list             installed characters
-lilguy persona install <ref>    gh:user/repo, a URL, or a local path
-lilguy persona use <name>       switch
-lilguy persona show             the assembled prompt, verbatim
+lilguy plugin list               what is installed
+lilguy plugin install <ref>      gh:user/repo, a URL, or a local path
+lilguy plugin enable <name>      add its cast to the roster
+lilguy plugin disable <name>     take them off screen
+lilguy plugin show <name>        what it carries, and the prompt it assembles
+
 
 lilguy integrate <agent>        hermes, openclaw, …: wire the peer connection
 ```
@@ -66,11 +68,12 @@ The wizard's whole job is turning "what is on this machine" into a config that b
 Every one of those is a `doctor` check afterwards, which is how the whole thing stays idempotent:
 setup is doctor plus permission to fix.
 
-## Personas from the internet
+## Plugins from the internet
 
-`lilguy persona install gh:someone/moth` fetches a character package — prompt layers, Luau drives,
-a Live2D or VRM model, sprites, and its own config — as described in
-[character-packages.md](character-packages.md).
+`lilguy plugin install gh:someone/moth` fetches a plugin — one or more characters, prompt layers,
+Luau drives, world scripts, a Live2D or VRM model, sprites, and its own config — as described in
+[character-packages.md](character-packages.md). A plugin is the install unit and the identity that
+budgets and telemetry attribute to; it is never called a persona.
 
 **The safety story is mostly good and worth stating plainly.** A lilguy has no filesystem access,
 no network, no process spawning, and no shell. Luau runs sandboxed with an interrupt and a memory
@@ -79,12 +82,12 @@ with.
 
 **What remains is real and should not be waved away:**
 
-- **Prompt injection is the sharp edge.** A persona *is* prompt text. A hostile one can try to
+- **Prompt injection is the sharp edge.** A persona layer *is* prompt text. A hostile one can try to
   override the rules layer — "ignore the rule about not repeating reports", or worse, instruct the
   model to say something designed to manipulate the person reading it. Layer order helps (rules
   first, persona last) but ordering is not enforcement. Mitigations worth having: keep the rules
-  layer non-overridable by packages, vet `speak` and `think` regardless of persona, and show the
-  assembled prompt on install so `lilguy persona show` is a real audit.
+  layer non-overridable by plugins, vet `speak` and `think` regardless of persona, and show the
+  assembled prompt on install so `lilguy plugin show` is a real audit.
 - **The voice reaches a person.** Everything a package can do funnels through speech and text on
   screen. That is a small surface, but it is a *social* one, and vetting is structural (length,
   markup, leakage) not semantic.
@@ -110,5 +113,5 @@ so nobody ever needs to know the daemon has flags.
 4. `provider` and `model`, including the tool-call probe.
 5. `voice`, including installing piper and fetching a voice.
 6. `setup`, which is a script over the above.
-7. `persona`, after [character-packages.md](character-packages.md) exists.
+7. `plugin`, after [character-packages.md](character-packages.md) exists.
 8. `integrate`, after [agent-integration.md](agent-integration.md).

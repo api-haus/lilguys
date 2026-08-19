@@ -12,7 +12,7 @@ flowchart TD
     P1 --> P2["2 · legible<br/><i>you can see what it costs</i>"]
     P2 --> P3["3 · split<br/><i>the mind restarts alone</i>"]
     P3 --> P4["4 · scriptable<br/><i>a drive is a file</i>"]
-    P4 --> P5["5 · packaged<br/><i>install a character</i>"]
+    P4 --> P5["5 · packaged<br/><i>install a plugin</i>"]
     P5 --> P6["6 · worlds<br/><i>a cast in a situation</i>"]
     P3 --> P7["7 · agents<br/><i>the face of hermes</i>"]
 ```
@@ -117,19 +117,19 @@ be restarted without killing anyone.
 
 ## Phase 5 — packaged
 
-**Demo:** `lilguy persona install gh:someone/moth` and a different creature is on your desktop.
+**Demo:** `lilguy plugin install gh:someone/moth` and a different creature is on your desktop.
 
 | work | design | size |
 |---|---|---|
-| Package layout; `lilguy persona install/list/use/show` | [character-packages](todo/character-packages.md) | 3 days |
-| Prompt layers from a package — with `rules` **not** overridable | [character-packages](todo/character-packages.md) | 1 day |
+| Package layout; `lilguy plugin install/list/use/show` | [character-packages](todo/character-packages.md) | 3 days |
+| Prompt layers from a plugin — with `rules` **not** overridable | [character-packages](todo/character-packages.md) | 1 day |
 | Plugin identity, so telemetry attribution has a subject | [taxonomy-and-telemetry](todo/taxonomy-and-telemetry.md) | 1 day |
 | Sprite adapter behind `Avatar`, reading Shimeji sets | [design-space §4](design-space.md) | 3 days |
 | Live2D adapter — Cubism Native over FFI | [design-space §4](design-space.md) | 2 weeks |
 | VRM adapter — glTF plus morph targets on wgpu | [design-space §4](design-space.md) | 2 weeks |
 | Entities: spawn, draw, drag, drop, and the observations each produces | [character-packages](todo/character-packages.md) | 1 week |
 | Context menus, hover, declarative entity reflexes | [character-packages](todo/character-packages.md) | 3 days |
-| Pinned refs, and `persona show` as a real audit against prompt injection | [lilguy-cli](todo/lilguy-cli.md) | 2 days |
+| Pinned refs, and `lilguy plugin show` as a real audit against prompt injection | [lilguy-cli](todo/lilguy-cli.md) | 2 days |
 
 **Acceptance:** play with a character for five minutes, then read `events.jsonl` — the session
 should be legible from the log alone.

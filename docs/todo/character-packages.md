@@ -1,35 +1,44 @@
-# Character packages, entities, and interaction
+# Plugins: casts, entities, and interaction
 
 **Status:** not started. **Depends on:** [luau-scripting.md](luau-scripting.md),
 [soul-hologram-split.md](soul-hologram-split.md).
 
-A character is not a persona string. It is a look, a voice, a set of drives, a set of things it
-carries or plays with, and the ways a person can interact with all of that. This is the format for
-shipping one, and the interaction model underneath it.
+A plugin is never just a persona. The smallest one is a single character — a look, a voice, drives,
+things it carries — and the largest is an entire cast with the world scripts that run them. One
+install unit, one identity for telemetry and budgets, one thing to enable or disable. `persona` is
+the wrong word for it and is not used anywhere.
+
+This is the format, and the interaction model underneath it.
 
 ## The package
 
 ```
 moth/
-  moth.toml            prompt layer wiring, drive config, entity declarations
+  plugin.toml          identity, version, required taxonomy, tiers wanted
+  characters/
+    moth.toml          persona, palette, size, voice — one file per character
   prompt/
-    persona.md         the persona layer
-    self.md            optional: override the self-model layer
+    self.md            optional: override the self-model layer for this cast
   drives/
     phototaxis.lua     drifts toward the brightest window
     hunger.lua
+  world/
+    night.lua          optional: a director, for a plugin that carries a situation
   avatar/
     moth.model3.json   Live2D, or moth.vrm, or sprites/
   entities/
-    lamp.lua           a thing that exists alongside him
+    lamp.lua           a thing that exists alongside them
     lamp.png
 ```
 
-Installed by `lilguy persona install gh:someone/moth`. Everything about a character lives here;
+The same layout scales from one creature to a cast of seven: more files under `characters/`, and
+`world/` starts earning its place. Nothing about the format changes.
+
+Installed by `lilguy plugin install gh:someone/moth`. Everything about a character lives here;
 nothing about a character is code in this repository.
 
-**The rules prompt layer is not part of a package.** Packages supply `persona`, and may supply
-`self`; `rules` stays with the daemon and is not overridable. See the safety section in
+**The rules prompt layer is not part of a plugin.** Plugins supply `persona` per character, and may
+supply `self` for the cast; `rules` stays with the daemon and is not overridable. See the safety section in
 [lilguy-cli.md](lilguy-cli.md) — this is the one structural defence against a hostile persona.
 
 ## Entities
@@ -120,7 +129,7 @@ five minutes, then read `events.jsonl` — the session should be legible from th
 
 Ordered so each step is usable before the next exists.
 
-1. Package layout, `lilguy persona install`, prompt layers from a package. No entities yet.
+1. Package layout, `lilguy plugin install`, prompt layers from a package. No entities yet.
 2. Avatar loading from a package (sprites first, then Live2D and VRM adapters).
 3. Drives from a package, over the Luau host.
 4. Entities: spawn, draw, drag, drop, and their observations.
@@ -129,8 +138,9 @@ Ordered so each step is usable before the next exists.
 
 ## Open questions
 
-- Can two packages be installed at once — a character plus a separate drive pack? Composable is
-  nicer and much harder to make safe. Probably one character, many drives.
+- Can two plugins be enabled at once — a cast plus a separate drive pack? Composable is nicer and
+  much harder to make safe. The roster already supports guys from different sources, so the answer
+  is probably yes with a namespacing rule.
 - Do entities persist across restarts? A ball he was carrying should probably still be there. That
   needs entity state in the same persistence as script state.
 - Should entities be sensed as *objects* rather than events?

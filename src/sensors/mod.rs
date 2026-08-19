@@ -98,6 +98,19 @@ impl Observation {
         }
     }
 
+    /// Who keeps saying this. Used to damp a single noisy source without silencing everything.
+    pub fn source(&self) -> String {
+        match self {
+            Observation::Focus { app_id, .. } | Observation::Title { app_id, .. } => {
+                format!("app:{app_id}")
+            }
+            Observation::Workspace { .. } => "workspace".into(),
+            Observation::Presence { .. } => "presence".into(),
+            Observation::Media { player, .. } => format!("media:{player}"),
+            Observation::Feeling(f) => format!("feeling:{}", f.source),
+        }
+    }
+
     pub fn summary(&self) -> String {
         match self {
             Observation::Focus { app_id, title } => format!("focus {app_id} — {}", clip(title, 34)),

@@ -343,6 +343,8 @@ pub struct Senses {
     /// Repeats of the same observation inside this window are dropped.
     #[serde(with = "humantime_serde")]
     pub novelty_window: Duration,
+    /// Observations one source may contribute inside that window before the rest are dropped.
+    pub per_source_cap: usize,
 }
 
 /// Where the turn-by-turn record goes. On by default — a buddy that misbehaves silently is
