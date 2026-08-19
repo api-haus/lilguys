@@ -443,6 +443,8 @@ impl Body {
         }
     }
 
+    /// Runs every tick whether or not an expression is held, because a face that stops being
+    /// pushed does not relax on its own — it freezes wherever it was left.
     fn apply_emotion(&mut self, dt: f32, pose: &mut Pose) {
         if self.emotion_hold > 0.0 {
             self.emotion_hold -= dt;
@@ -450,10 +452,8 @@ impl Body {
                 self.emotion_weight = 0.0;
             }
         }
-        if self.emotion_weight <= 0.001 {
-            return;
-        }
-        for (p, target) in self.emotion.targets() {
+        let held = self.emotion.targets();
+        for p in Param::EXPRESSIVE {
             // Blinks and speech own their parameters outright; an expression must not fight them.
             if matches!(p, Param::EyeOpenL | Param::EyeOpenR) && self.blink_phase > 0.0 {
                 continue;
@@ -461,7 +461,10 @@ impl Body {
             if matches!(p, Param::MouthOpen) && self.speaking {
                 continue;
             }
-            pose.ease_to(*p, target * self.emotion_weight, 5.0, dt);
+            let rest = p.rest();
+            let target = held.iter().find(|(q, _)| *q == p).map(|(_, v)| *v).unwrap_or(rest);
+            // Blend from rest toward the expression, so weight 0 is a face at rest, not a stale one.
+            pose.ease_to(p, rest + (target - rest) * self.emotion_weight, 5.0, dt);
         }
     }
 }

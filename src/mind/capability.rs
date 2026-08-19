@@ -189,7 +189,7 @@ pub fn parse(name: &str, arguments: &str) -> Result<Intent, String> {
                 return Err("empty".into());
             }
             vet_leakage(&text)?;
-            Ok(Intent::Think { text, hold: a.hold.clamp(3.0, 300.0) })
+            Ok(Intent::Think { text, hold: a.hold.clamp(12.0, 300.0) })
         }
         "speak" => {
             let a: SpeakArgs = serde_json::from_str(args).map_err(|e| e.to_string())?;
@@ -239,7 +239,7 @@ pub fn schemas() -> Value {
             "type": "object",
             "properties": {
                 "text": { "type": "string", "description": "the thought, a phrase or a sentence" },
-                "hold": { "type": "number", "description": "seconds to leave it up" }
+                "hold": { "type": "number", "description": "seconds to leave it up; 20 to 60 reads well, under 12 is too brief to finish reading" }
             },
             "required": ["text"]
         })),

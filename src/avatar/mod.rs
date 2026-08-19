@@ -56,6 +56,13 @@ impl Param {
         }
     }
 
+    /// Parameters an expression owns. Anything not listed is driven by gaze, breath or a gesture,
+    /// and an emotion must not touch it.
+    pub const EXPRESSIVE: [Param; 11] = {
+        use Param::*;
+        [BrowL, BrowR, MouthOpen, MouthForm, EyeOpenL, EyeOpenR, Joy, Sorrow, Anger, Fun, Surprise]
+    };
+
     /// Rest value. Eyes rest open; everything else rests at zero.
     pub fn rest(self) -> f32 {
         matches!(self, Param::EyeOpenL | Param::EyeOpenR) as u8 as f32
