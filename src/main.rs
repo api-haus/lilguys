@@ -45,11 +45,22 @@ fn main() -> Result<()> {
             return Ok(());
         }
         Some("--check") => return check(),
-        // Whatever the model is actually told, verbatim. The one way to see the assembled prompt.
+        // Whatever each guy is actually told, verbatim — including the line naming the others,
+        // which the shared layers do not contain.
         Some("--print-prompt") => {
             let (cfg, from) = Config::load()?;
             let dir = from.as_deref().and_then(|p| p.parent());
-            println!("{}", cfg.prompt.assemble(&cfg.buddy.name, dir));
+            let roster = cfg.roster(dir)?;
+            let names: Vec<String> = roster
+                .iter()
+                .map(|(g, c)| g.name.clone().unwrap_or_else(|| c.name.clone()))
+                .collect();
+            for (i, (_, character)) in roster.iter().enumerate() {
+                let others: Vec<String> =
+                    names.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, n)| n.clone()).collect();
+                println!("═══ {} ═══\n", names[i]);
+                println!("{}\n", guy::Guy::system_prompt(&cfg, character, &names[i], &others));
+            }
             return Ok(());
         }
         Some(other) => anyhow::bail!("unknown argument {other}; try --check, --print-config or --print-prompt"),
@@ -95,9 +106,15 @@ fn main() -> Result<()> {
 
     // Everyone on the roster gets their own mind, their own voice queue, and their own gate.
     let roster = cfg.roster(config_dir.as_deref())?;
+    let all_names: Vec<String> = roster
+        .iter()
+        .map(|(g, c)| g.name.clone().unwrap_or_else(|| c.name.clone()))
+        .collect();
     let mut guys = Vec::new();
     for (i, (entry, character)) in roster.iter().enumerate() {
-        let system = guy::Guy::system_prompt(&cfg, character, &character.name);
+        let others: Vec<String> =
+            all_names.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, n)| n.clone()).collect();
+        let system = guy::Guy::system_prompt(&cfg, character, &character.name, &others);
 
         // One channel per guy, each closing over its own index, so a message always knows whose
         // it is without a wrapper type.

@@ -108,6 +108,9 @@ context_tokens = 6000
 keep_recent = 12
 turns_per_hour = 20.0
 think_while_away = false
+# With nothing happening, a character still has an interior life. This is what makes idle chatter
+# and conversation between guys possible at all — see the note in docs/todo/many-guys.md.
+restless_after = "4m"
 
 # Any OpenAI-compatible endpoint works. llama.cpp's server, ollama, vLLM, LM Studio, OpenRouter
 # and OpenAI itself all speak this, so `[providers.*]` is the only thing that changes between them.

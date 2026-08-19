@@ -42,7 +42,7 @@ impl Quantum {
             out.push('\n');
         }
         if self.events.is_empty() {
-            out.push_str("- nothing new\n");
+            out.push_str("- nothing at all. it has been quiet a while\n");
         }
         out
     }
@@ -283,12 +283,18 @@ impl Quantiser {
         self.last_sent.elapsed()
     }
 
-    /// Returns a quantum once its window has elapsed and there is something to say. An empty
-    /// quantum is skipped entirely — silence costs nothing and is the common case.
+    /// Returns a quantum once its window has elapsed and there is something to say — or once it
+    /// has been quiet long enough that having nothing to say is itself worth a thought.
     pub fn take(&mut self, config: &MindConfig, now: Instant) -> Option<Quantum> {
         let window = if self.present { config.quantum } else { config.idle_quantum };
         let since = now.duration_since(self.last_sent);
-        if since < window || self.events.is_empty() {
+        if since < window {
+            return None;
+        }
+        let restless = !config.restless_after.is_zero()
+            && self.present
+            && since >= config.restless_after;
+        if self.events.is_empty() && !restless {
             return None;
         }
         self.last_sent = now;

@@ -50,7 +50,8 @@ characters on their desktop that they can talk to.
 | Input surface: click him, type, Escape closes; reuses the bubble renderer | [talking-to-him](todo/talking-to-him.md) | 2 days |
 | Per-guy voices — the field exists and is not read | [many-guys](todo/many-guys.md) | half a day |
 | A shared floor on silence, so a cast is not a room that will not shut up | [many-guys](todo/many-guys.md) | half a day |
-| `awareness` layer names the others; `speak` gains an optional `to` | [many-guys](todo/many-guys.md) | 1 day |
+| Tune the speak preference for company — it is set for a solo buddy | [many-guys](todo/many-guys.md) | half a day |
+| `speak` gains an optional `to`, so they can address each other | [many-guys](todo/many-guys.md) | 1 day |
 | `lilguy setup` — probe providers, probe **native tool calls**, pull a model, fetch a voice, install the unit | [lilguy-cli](todo/lilguy-cli.md) | 3 days |
 
 **Why first:** everything else is worth more if somebody else can run it, and `lilguy say` unblocks

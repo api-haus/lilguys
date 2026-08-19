@@ -255,6 +255,11 @@ pub struct Mind {
     pub turns_per_hour: f32,
     /// Model turns are skipped while the user is away.
     pub think_while_away: bool,
+    /// How long a guy will go with nothing happening before he thinks anyway. Without this,
+    /// silence is self-sustaining: an empty slice is never sent, so nobody acts, so nobody has
+    /// anything to react to. Zero disables idling entirely.
+    #[serde(with = "humantime_serde")]
+    pub restless_after: Duration,
 }
 
 /// Every provider speaks the OpenAI chat-completions wire format: llama.cpp's server, ollama,

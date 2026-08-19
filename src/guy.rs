@@ -63,12 +63,26 @@ impl Guy {
         }
     }
 
-    /// The system prompt for this one: the shared layers, with its own persona replacing the last.
-    pub fn system_prompt(cfg: &Config, character: &Character, name: &str) -> String {
+    /// The system prompt for this one: the shared layers, its own persona replacing the last, and
+    /// a line naming whoever else is on screen. Without that, a report saying another creature did
+    /// something arrives with no idea who that is.
+    pub fn system_prompt(
+        cfg: &Config, character: &Character, name: &str, others: &[String],
+    ) -> String {
         let mut prompt = cfg.prompt.clone();
         if let Some(layer) = prompt.texts.get_mut("persona") {
             layer.text = character.persona.clone();
             layer.file = None;
+        }
+        if !others.is_empty() {
+            if let Some(layer) = prompt.texts.get_mut("awareness") {
+                layer.text.push_str(&format!(
+                    "\n\nYou are not alone here. Also on this desktop: {}. You see what they do and \
+                     hear what they say, and they see and hear you. They are company, not scenery — \
+                     if one of them says something worth answering, answer it.",
+                    others.join(", ")
+                ));
+            }
         }
         prompt.assemble(name, None)
     }

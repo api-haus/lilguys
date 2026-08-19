@@ -46,6 +46,24 @@ they already know they did it.
 A face is only witnessed above intensity 0.5. A flicker is nobody else's business, and reporting
 every micro-expression would drown two guys in each other.
 
+## Why they were silent
+
+Worth recording, because none of it was the models' fault and all of it looked like it was.
+
+They *do* witness each other — `lil: you feel SpongeBob made a gesture — wave` was in the log the
+whole time. Three things stopped it becoming conversation:
+
+1. **Silence was self-sustaining.** An empty slice was never sent, so nothing produced nothing:
+   nobody acted, so nobody had anything to react to, forever. `restless_after` breaks the loop — a
+   guy who has been quiet that long gets a slice saying so, and a character with a personality does
+   something in character with nothing. **This is what makes idle chatter possible at all.**
+2. **Nothing told them anybody else existed.** A line saying another creature did something arrived
+   with no idea who that was. The `awareness` layer now names the others and says they are company,
+   not scenery.
+3. **The prompt drives hard toward silence** — react over gesture over speak, and "calling none at
+   all is the most common correct response". Correct for one guy watching a desktop; still probably
+   too strong for a cast, and the next thing to tune.
+
 ## What is missing
 
 1. **Per-guy voices.** The `voice` field exists on a character and a guy and is not yet read. Two
