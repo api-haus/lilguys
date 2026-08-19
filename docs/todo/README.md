@@ -31,6 +31,7 @@ flowchart TD
 | [character-packages](character-packages.md) | look, voice, drives, entities and interaction, shipped as a directory | after scripting |
 | [agent-integration](agent-integration.md) | be the face of hermes or openclaw; the original reason for all this | after the split and the message path |
 | [object-persistence](object-persistence.md) | whether persistent things need representing at all | open question; may be answered by doing nothing |
+| [many-guys](many-guys.md) | a cast rather than a mascot; the roster works, the social layer is thin | now — voices and addressing are the gaps |
 | [three-process-split](three-process-split.md) | pull the mind out of the soul | trigger-gated; not soon |
 
 ## The through-line

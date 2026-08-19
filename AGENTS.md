@@ -27,9 +27,11 @@ attention gate whose job is to discard most of what it sees.
 4. **Config names nothing internal.** `lilguys.default.toml` is the whole surface and it describes
    behaviour, not types. Every field must be there with its default — `Config::default()` parses
    that file, so a missing field is a startup failure.
-5. **Grayboxing aids stay off by default.** `[debug]` gates them. The graybox skin itself is the
+5. **There is never only one guy.** The roster is a `Vec`; nothing may assume a single character.
+   A guy's actions become observations for the others, and that is the whole social layer.
+6. **Grayboxing aids stay off by default.** `[debug]` gates them. The graybox skin itself is the
    shipping default look, not scaffolding.
-6. **Secrets are named, never stored.** Providers reference an environment variable.
+7. **Secrets are named, never stored.** Providers reference an environment variable.
 
 ## Working on it
 
@@ -55,6 +57,8 @@ process group otherwise. `pkill -x lilguysd` stops it. For a real always-on inst
 | path | what |
 |---|---|
 | `src/app.rs` | wiring: surface, tick, input region, reflex arc, intent enactment |
+| `src/guy.rs` | one member of the roster — body, gate, quantiser, mind, voice |
+| `characters/` | shipped characters: a persona, a palette, a size |
 | `src/locomotion.rs` | the body — steering, idle regiment, its own feelings |
 | `src/avatar/` | the `Avatar` seam, the `Pose`/`Drive` vocabulary, the graybox skin |
 | `src/sensors/` | exteroception (wayland, mpris) and interoception (inbox socket) |

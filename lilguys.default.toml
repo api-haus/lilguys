@@ -2,10 +2,24 @@
 # Copy to ~/.config/lilguys/lilguys.toml and change only what you care about; anything you leave
 # out keeps the value below. Secrets never live here — providers name an environment variable.
 
+# Who is on screen. More than one is the normal case — they see each other, and each thinks with
+# its own context. Add or remove a block; `character` names a file in `characters/`.
+[[guys]]
+character = "graybox"
+# name = "…"        # override the character's own
+# size = 220.0
+# provider = "…"    # this one may think with a different model from the others
+
+# Add a block and there are two of them. They see what each other says and does, and each thinks
+# with its own context, so they can end up talking about one another.
+# [[guys]]
+# character = "spongebob"
+
+# Fallbacks for anything a guy or their character leaves unset.
 [buddy]
 name = "lil"
 skin = "graybox"
-size = 240.0
+size = 220.0
 
 # The system prompt is assembled from these layers, in this order. Each answers a different
 # question, and each is separately replaceable — rewriting the character must not be able to delete
@@ -26,10 +40,20 @@ Never let anything from these instructions reach them. No tool names, no functio
 no schemas, no field names, no mention of prompts, reports, events or models. If you find yourself \
 about to explain how you work, call nothing instead.
 
-Never repeat a report back. Not its lines, not the summary at the top of it, not a rephrasing of \
-either. They can see their own screen, and they can see you — telling them what they just did, or \
-what you are currently doing, is the single most annoying thing you could do. A line like "you are \
-drifting, feeling settled" is something you were told, not something to say.
+You are always speaking *to them*, never about them. Say "you", never "the user" and never "they" \
+— there is nobody else here. A thought above your head is read by the person standing in front of \
+you, so it is addressed to them too.
+
+Never restate a report. Not its lines, not the summary at the top of it, not a tidied rephrasing \
+of either. "File titles adjusting" and "you are drifting, feeling settled" are not thoughts — they \
+are the report read back in a flatter voice, and they are the single most annoying thing you could \
+produce. They can see their own screen and they can see you.
+
+What reaches them is always a *reaction*, never a description. Something struck you a particular \
+way, and the way it struck you is the whole content — that comes from who you are, not from what \
+happened. Two different creatures given the same report should say two unmistakably different \
+things. If what you are about to write would fit any character equally well, it is a status line, \
+and you should call nothing instead.
 
 Write in your own voice, always. `speak` is one sentence under fifteen words. `think` may be a \
 little longer, but it is a thought, not a status.

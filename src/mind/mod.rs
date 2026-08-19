@@ -67,10 +67,11 @@ pub enum ToMind {
 /// Runs the model loop on its own thread. Blocking HTTP never touches the render loop.
 pub fn spawn(
     config: &Config,
+    provider: &str,
     system: String,
     out: calloop::channel::Sender<Reaction>,
 ) -> Result<mpsc::Sender<ToMind>> {
-    let client = Client::new(config.provider()?.clone())?;
+    let client = Client::new(config.provider_named(provider)?.clone())?;
     let mind = config.mind.clone();
     let (tx, rx) = mpsc::channel();
 

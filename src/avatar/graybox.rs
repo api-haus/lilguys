@@ -3,10 +3,6 @@
 use super::{Avatar, Bounds, Drive, Gesture, Param, Pose};
 use crate::gpu::painter::{rgba, Color, Painter};
 
-const SKIN: Color = rgba(232, 196, 160, 1.0);
-const TORSO: Color = rgba(96, 124, 176, 1.0);
-const ARM: Color = rgba(104, 168, 128, 1.0);
-const LEG: Color = rgba(200, 136, 84, 1.0);
 const JOINT: Color = rgba(255, 255, 255, 0.85);
 const INK: Color = rgba(24, 26, 32, 1.0);
 const LABEL: Color = rgba(255, 255, 255, 0.55);
@@ -16,13 +12,19 @@ const GAZE: Color = rgba(250, 214, 82, 0.75);
 pub struct Graybox {
     pose: Pose,
     drive: Drive,
+    palette: crate::config::Skin,
     /// Draw joint dots, part labels and the bounds frame.
     pub annotate: bool,
 }
 
 impl Default for Graybox {
     fn default() -> Self {
-        Self { pose: Pose::default(), drive: Drive::default(), annotate: false }
+        Self {
+            pose: Pose::default(),
+            drive: Drive::default(),
+            palette: crate::config::Skin::default(),
+            annotate: false,
+        }
     }
 }
 
@@ -55,6 +57,10 @@ impl Avatar for Graybox {
         self.drive = drive.clone();
     }
 
+    fn set_palette(&mut self, skin: crate::config::Skin) {
+        self.palette = skin;
+    }
+
     fn bounds(&self) -> Bounds {
         Bounds { left: -0.26, top: -1.0, right: 0.26, bottom: 0.03 }
     }
@@ -67,6 +73,13 @@ impl Avatar for Graybox {
 
     fn draw(&self, painter: &mut Painter, origin: P, facing: f32, scale: f32) {
         let p = &self.pose;
+        let opaque = |c: [u8; 3]| rgba(c[0], c[1], c[2], 1.0);
+        let (skin, torso_c, arm_c, leg_c) = (
+            opaque(self.palette.head),
+            opaque(self.palette.torso),
+            opaque(self.palette.arm),
+            opaque(self.palette.leg),
+        );
         let m = if facing < 0.0 { -1.0 } else { 1.0 };
         // X-ish params are world space; `to_px` mirrors, so rig-local uses must pre-multiply by m
         // and screen-space uses must not. Getting this backwards inverts the gaze when facing left.
@@ -110,15 +123,15 @@ impl Avatar for Graybox {
             let h = add(hip, [side * 0.075, 0.0]);
             let knee = add(h, [s * 0.16, 0.24 - l * 0.4 - tuck]);
             let foot = add(knee, [s * 0.10, 0.22 - l - tuck]);
-            painter.line(to_px(h), to_px(knee), 0.075 * px, LEG);
-            painter.line(to_px(knee), to_px(foot), 0.065 * px, LEG);
+            painter.line(to_px(h), to_px(knee), 0.075 * px, leg_c);
+            painter.line(to_px(knee), to_px(foot), 0.065 * px, leg_c);
             painter.rrect(
                 to_px(add(foot, [0.02, 0.012]))[0],
                 to_px(add(foot, [0.02, 0.012]))[1],
                 0.13 * px,
                 0.045 * px,
                 0.02 * px,
-                LEG,
+                leg_c,
             );
             if self.annotate {
                 painter.ellipse(to_px(knee)[0], to_px(knee)[1], 0.028 * px, 0.028 * px, JOINT);
@@ -135,7 +148,7 @@ impl Avatar for Graybox {
             (hip[1] - chest[1]).abs() * px + 0.06 * px,
             0.09 * px,
             (chest[0] - hip[0]) * m * 0.6,
-            TORSO,
+            torso_c,
         );
 
         // ---- arms ----
@@ -165,9 +178,9 @@ impl Avatar for Graybox {
                 }
                 _ => {}
             }
-            painter.line(to_px(shoulder), to_px(elbow), 0.062 * px, ARM);
-            painter.line(to_px(elbow), to_px(hand), 0.054 * px, ARM);
-            painter.ellipse(to_px(hand)[0], to_px(hand)[1], 0.055 * px, 0.055 * px, ARM);
+            painter.line(to_px(shoulder), to_px(elbow), 0.062 * px, arm_c);
+            painter.line(to_px(elbow), to_px(hand), 0.054 * px, arm_c);
+            painter.ellipse(to_px(hand)[0], to_px(hand)[1], 0.055 * px, 0.055 * px, arm_c);
             if self.annotate {
                 painter.ellipse(to_px(shoulder)[0], to_px(shoulder)[1], 0.028 * px, 0.028 * px, JOINT);
                 painter.ellipse(to_px(elbow)[0], to_px(elbow)[1], 0.024 * px, 0.024 * px, JOINT);
@@ -189,7 +202,7 @@ impl Avatar for Graybox {
             [yaw * 0.035 + shake * m, -0.105 + p.get(Param::HeadPitch) * 0.012 + nod],
         );
         let head_c = rot_about(head_c, neck, roll * 0.5);
-        painter.line(to_px(neck), to_px(head_c), 0.07 * px, SKIN);
+        painter.line(to_px(neck), to_px(head_c), 0.07 * px, skin);
         painter.rrect_rot(
             to_px(head_c)[0],
             to_px(head_c)[1],
@@ -197,7 +210,7 @@ impl Avatar for Graybox {
             0.245 * px,
             0.10 * px,
             roll * m,
-            SKIN,
+            skin,
         );
 
         // ---- face ----

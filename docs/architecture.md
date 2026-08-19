@@ -1,7 +1,9 @@
 # lilguys — architecture
 
-One daemon, `lilguysd`. It draws a character on a Wayland overlay, senses what happens on the
-desktop, and lets a language model decide what the character does about it.
+One daemon, `lilguysd`. It draws **any number of characters** on a Wayland overlay, senses what
+happens on the desktop, and lets a language model decide what each of them does about it. Every guy
+has his own gate, his own context window and optionally his own model; they share the surface, the
+senses, and everything each other does. See [todo/many-guys.md](todo/many-guys.md).
 
 Everything below describes what the code does today. **[philosophy.md](philosophy.md) says what it
 is held to** — the mind/body split, the two kinds of sensing, and the six things a change may not

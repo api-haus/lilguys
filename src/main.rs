@@ -5,6 +5,7 @@ mod attention;
 mod avatar;
 mod config;
 mod gpu;
+mod guy;
 mod hypr;
 mod locomotion;
 mod log;
@@ -90,22 +91,60 @@ fn main() -> Result<()> {
 
     let mut event_loop: EventLoop<App> = EventLoop::try_new()?;
     let handle = event_loop.handle();
-
-    let (voice_tx, voice_rx) = calloop::channel::channel();
-    let (mind_tx, mind_rx) = calloop::channel::channel();
     let (sense_tx, sense_rx) = calloop::channel::channel();
 
-    let voice = voice::Voice::new(&cfg.voice, voice_tx);
-    let to_mind = match cfg.mind.enabled {
-        true => match mind::spawn(&cfg, system, mind_tx) {
-            Ok(tx) => Some(tx),
-            Err(e) => {
-                eprintln!("mind disabled: {e:#}");
-                None
+    // Everyone on the roster gets their own mind, their own voice queue, and their own gate.
+    let roster = cfg.roster(config_dir.as_deref())?;
+    let mut guys = Vec::new();
+    for (i, (entry, character)) in roster.iter().enumerate() {
+        let system = guy::Guy::system_prompt(&cfg, character, &character.name);
+
+        // One channel per guy, each closing over its own index, so a message always knows whose
+        // it is without a wrapper type.
+        let (voice_tx, voice_rx) = calloop::channel::channel::<voice::State>();
+        handle
+            .insert_source(voice_rx, move |event, _, app: &mut App| {
+                if let calloop::channel::Event::Msg(state) = event {
+                    if let Some(guy) = app.guys.get_mut(i) {
+                        guy.body.speaking = state == voice::State::Speaking;
+                        if state == voice::State::Silent {
+                            guy.voice.finished_one();
+                        }
+                    }
+                }
+            })
+            .map_err(|e| anyhow::anyhow!("voice channel: {e}"))?;
+
+        let (mind_tx, mind_rx) = calloop::channel::channel::<mind::Reaction>();
+        handle
+            .insert_source(mind_rx, move |event, _, app: &mut App| {
+                if let calloop::channel::Event::Msg(r) = event {
+                    app.enact(i, r);
+                }
+            })
+            .map_err(|e| anyhow::anyhow!("mind channel: {e}"))?;
+
+        let voice = voice::Voice::new(&cfg.voice, voice_tx);
+        let to_mind = match cfg.mind.enabled {
+            true => {
+                let provider = entry.provider.clone().unwrap_or_else(|| cfg.mind.provider.clone());
+                match mind::spawn(&cfg, &provider, system, mind_tx) {
+                    Ok(tx) => Some(tx),
+                    Err(e) => {
+                        eprintln!("{}: mind disabled: {e:#}", character.name);
+                        None
+                    }
+                }
             }
-        },
-        false => None,
-    };
+            false => None,
+        };
+        guys.push(guy::Guy::new(&cfg, entry, character, [1.0, 1.0], voice, to_mind));
+    }
+    eprintln!(
+        "roster: {}",
+        guys.iter().map(|g| format!("{} ({})", g.name, g.character)).collect::<Vec<_>>().join(", ")
+    );
+
     if cfg.senses.media {
         sensors::mpris::spawn(sense_tx.clone());
     }
@@ -126,8 +165,7 @@ fn main() -> Result<()> {
         Hypr::from_env()?,
         sensors,
         cfg,
-        voice,
-        to_mind,
+        guys,
     );
 
     WaylandSource::new(conn, event_queue).insert(handle.clone())?;
@@ -138,23 +176,6 @@ fn main() -> Result<()> {
             }
         })
         .map_err(|e| anyhow::anyhow!("sense channel: {e}"))?;
-    handle
-        .insert_source(mind_rx, |event, _, app: &mut App| {
-            if let calloop::channel::Event::Msg(r) = event {
-                app.enact(r);
-            }
-        })
-        .map_err(|e| anyhow::anyhow!("mind channel: {e}"))?;
-    handle
-        .insert_source(voice_rx, |event, _, app: &mut App| {
-            if let calloop::channel::Event::Msg(state) = event {
-                app.body.speaking = state == voice::State::Speaking;
-                if state == voice::State::Silent {
-                    app.voice.finished_one();
-                }
-            }
-        })
-        .map_err(|e| anyhow::anyhow!("voice channel: {e}"))?;
     handle
         .insert_source(Timer::immediate(), |_, _, app: &mut App| {
             app.tick();

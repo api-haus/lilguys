@@ -244,6 +244,9 @@ pub trait Avatar {
     /// Advance internal animation (physics, motion playback) — never reads the world.
     fn advance(&mut self, pose: &Pose, drive: &Drive, dt: f32);
 
+    /// Recolour. A built-in skin repaints itself; an adapter with its own art ignores this.
+    fn set_palette(&mut self, _skin: crate::config::Skin) {}
+
     /// Emit geometry. `origin` is the character's ground point in surface pixels, `facing` is
     /// -1.0 (left) to 1.0 (right), `scale` is pixels per rig unit.
     fn draw(&self, painter: &mut Painter, origin: [f32; 2], facing: f32, scale: f32);
