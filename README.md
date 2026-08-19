@@ -7,6 +7,7 @@ He is the topmost surface of a [hermes](https://github.com/) agent that also ans
 cargo build --release
 ./target/release/lilguysd --print-config > ~/.config/lilguys/lilguys.toml   # optional
 ./target/release/lilguysd --check                                          # validates and probes
+./target/release/lilguysd --print-prompt                                   # the assembled prompt
 ./target/release/lilguysd
 ```
 

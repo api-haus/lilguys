@@ -44,7 +44,14 @@ fn main() -> Result<()> {
             return Ok(());
         }
         Some("--check") => return check(),
-        Some(other) => anyhow::bail!("unknown argument {other}; try --check or --print-config"),
+        // Whatever the model is actually told, verbatim. The one way to see the assembled prompt.
+        Some("--print-prompt") => {
+            let (cfg, from) = Config::load()?;
+            let dir = from.as_deref().and_then(|p| p.parent());
+            println!("{}", cfg.prompt.assemble(&cfg.buddy.name, dir));
+            return Ok(());
+        }
+        Some(other) => anyhow::bail!("unknown argument {other}; try --check, --print-config or --print-prompt"),
         None => {}
     }
 

@@ -35,6 +35,7 @@ attention gate whose job is to discard most of what it sees.
 cargo build --release
 ./target/release/lilguysd --check        # config, provider, native tool calls, voice binary
 ./target/release/lilguysd --print-config # every setting with its default
+./target/release/lilguysd --print-prompt # the assembled system prompt, verbatim
 cargo test --release
 ```
 
