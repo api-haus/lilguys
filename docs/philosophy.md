@@ -195,6 +195,11 @@ out of his mouth. A strand is a file or a block of text; the order is a list in 
 what a body can do — but only facts that hold for the life of the process. Anything that changes
 belongs in the event stream. A thread that moves is not a thread.
 
+**A fact that stops holding stops being a fact.** Who else is here is woven in today because the
+roster cannot change; once a world can spawn a character and release them again, arrival and
+departure are events like everything else. The test is not whether something is true — it is
+whether it will still be true in an hour.
+
 ### Where memory will go
 
 This also names the deferred question properly. Long-term memory is not a database bolted to the

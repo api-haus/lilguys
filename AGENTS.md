@@ -38,6 +38,8 @@ ordinary observations.
    behaviour, not types. Every field must be present with its default — `Config::default()` parses
    that file, so a missing field is a startup failure.
 6. **There is never only one guy.** The roster is a `Vec`; nothing may assume a single character.
+   It is fixed at startup today and will not stay that way — a world spawns and releases characters
+   — so anything newly written against a stable position is work somebody has to undo.
 7. **Every reflex records itself**, and a reflex record never triggers another reflex.
 8. **Whatever authors the world may not author a character.** Events in and verbs offered; never
    intents.

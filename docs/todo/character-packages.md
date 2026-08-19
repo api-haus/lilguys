@@ -34,6 +34,12 @@ moth/
 The same layout scales from one creature to a cast of seven: more files under `characters/`, and
 `world/` starts earning its place. Nothing about the format changes.
 
+**A plugin's cast is a catalogue, not a roster.** Installing seven characters does not put seven
+characters on the desktop. It makes seven characters *addressable* — `bikini-bottom/squidward`
+names one whether or not anybody has spawned him, and a world script decides who is present when.
+See [world-scripting.md](world-scripting.md). The short name is what a character says when
+addressing another, and it is qualified only when two installed plugins claim it.
+
 Installed by `lilguy plugin install gh:someone/moth`. Everything about a character lives here;
 nothing about a character is code in this repository.
 
@@ -138,9 +144,10 @@ Ordered so each step is usable before the next exists.
 
 ## Open questions
 
-- Can two plugins be enabled at once — a cast plus a separate drive pack? Composable is nicer and
-  much harder to make safe. The roster already supports guys from different sources, so the answer
-  is probably yes with a namespacing rule.
+- Two plugins enabled at once — a cast plus a separate drive pack — is the normal case rather than
+  an exotic one, since a character is addressable across the whole install. The namespacing rule is
+  therefore load-bearing: `plugin/character` is the identity, the short name is the address, and a
+  collision between two installed plugins is resolved by qualifying rather than by refusing.
 - Do entities persist across restarts? A ball he was carrying should probably still be there. That
   needs entity state in the same persistence as script state.
 - Should entities be sensed as *objects* rather than events?

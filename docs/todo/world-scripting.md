@@ -139,6 +139,83 @@ Three things fall out of this, and each is worth having on its own:
 - **`on_call` runs on the model's clock.** It must be interrupted and bounded like every other
   script entry point, and a verb that blocks is a verb that hangs a turn.
 
+## The cast is something the world can change
+
+A roster fixed at startup is a stage with the actors already standing on it. A situation needs
+entrances and exits: Squidward is not there until he is, Patrick leaves and the room is different
+for it, and an episode is largely a matter of who is present when.
+
+So a script may put a character on the desktop and take them off again, at any moment:
+
+```lua
+local squid = world.spawn{ character = "bikini-bottom/squidward", at = "top_right" }
+-- …an hour later, or a beat later
+world.release(squid)
+```
+
+`spawn` is authoring the world — the same class of act as making it rain. It is emphatically not
+authoring a character: a spawned creature arrives with its own thread, its own gate and its own
+context, and the first thing it does is entirely up to it.
+
+**A character reference is global.** `"bikini-bottom/squidward"` names a character in an installed
+plugin, and every plugin's cast is a catalogue rather than a list that must all be on screen. The
+runtime name — what `speak{to=…}` and `world.tell` resolve — is the short one, qualified only when
+two plugins ship the same name. One namespace for who *can* exist, one for who *is* here.
+
+### What a moving cast costs
+
+Two things that hold today stop holding, and both are worth naming before they are discovered.
+
+**Who else is here stops being a fact.** The engine currently weaves `{others}` into the sutra,
+which is sound while the roster cannot change and wrong the moment it can:
+[philosophy.md](../philosophy.md) says a strand carries only what holds for the life of the
+process, because a thread that moves is not a thread. With entrances and exits, arrival and
+departure become what they always were — *events*:
+
+```
+- Squidward is here now
+- Patrick has gone
+```
+
+That is not a workaround. It is the same rule that put feelings in the stream instead of the
+prompt, and it is what keeps a system prompt cacheable while the room fills up.
+
+**A guy is no longer an index.** The roster is a `Vec` whose positions are assumed stable in the
+channel closures that carry a reaction back to its owner. A cast that changes needs a stable id per
+character, a mind thread that starts and stops with them, and a voice queue that goes with it.
+That is the engine work behind the two lines of Lua above, and it is most of their cost.
+
+## A model driving the world
+
+The scripted verbs above are the same shape as a character's tools, and that is not a coincidence.
+Once a script can define what a verb does, it can also hand a set of verbs to a model and let the
+model decide when to use them. That is the difference between a written episode and a live one.
+
+```lua
+ctx.daily("19:00", function()
+  llm.run("might", {
+    system = "You are staging one evening at the Krusty Krab. Set things up and let it play.",
+    tools = { world.spawn, world.release, world.tell, world.broadcast, scene.set },
+    budget = 8,        -- calls, not tokens: the engine stops it at eight
+  })
+end)
+```
+
+A director model given `spawn`, `release`, `tell` and `broadcast` can stage a whole evening: bring
+Squidward in, make the grill smell wrong, put the lights out, send everybody home. Each of those is
+a fact about the world, and every character in it answers in their own voice, at their own pace,
+with their own model.
+
+**The boundary is exactly where it was.** Every verb a director may hold authors the world. There
+is no `say_as`, there is no `make_them_react`, and there never will be — the moment a model can put
+a line in SpongeBob's mouth the cast is a screenplay being read aloud, and nothing else in this
+document is worth having. A scenario is orchestrated by arranging what is true, never by dictating
+what is said.
+
+Which is also why this is worth doing at all. An episode assembled from seven independent minds
+reacting to a situation somebody staged is not a script with extra steps: nobody, including the
+director, knows what they are going to say.
+
 ## Event semantics
 
 How functional can this be in Luau? More than it looks, with one real gap.
@@ -414,6 +491,8 @@ structured should not be a `cargo build`.
 4. **`llm.ask(tier, prompt, opts)`** returning nil when refused, with the refusal logged.
 5. **`world.capability{…}`**, with per-character availability, a schema cap, and `on_call` bounded
    by the same interrupt as everything else.
+6. **A dynamic roster** — stable ids instead of indices, a mind and a voice that start and stop with
+   a character, and arrival and departure as ordinary observations rather than woven facts.
 
 ## Open questions
 
@@ -427,6 +506,12 @@ structured should not be a `cargo build`.
   announces itself is as annoying as a character that does. The gate protects characters from the
   desktop; nothing yet protects characters from an over-eager director. Probably the same shape of
   answer: a budget on authored events, and silence as the default.
+- **How many characters is too many?** Every guy on screen is a context window, a gate and a model.
+  Spawning is cheap to write and expensive to run, so a cast ceiling belongs somewhere — probably
+  as a budget the engine enforces rather than a number a script is trusted to respect.
+- **What happens to a released character's context?** Dropping it means a character who leaves and
+  returns is a stranger; keeping it means unbounded memory in a long session. The sutra persists
+  either way, which is the argument for dropping it and letting the thread be what carries them.
 - **Does the director need its own memory?** An arc spanning hours needs state across restarts.
   Script persistence covers it, but an arc is a bigger thing than a hunger counter and may want
   something better than a JSON blob.

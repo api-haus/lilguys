@@ -13,7 +13,7 @@ flowchart TD
     P2 --> P3["3 · split<br/><i>the mind restarts alone</i>"]
     P3 --> P4["4 · scriptable<br/><i>a drive is a file</i>"]
     P4 --> P5["5 · packaged<br/><i>install a plugin</i>"]
-    P5 --> P6["6 · worlds<br/><i>a cast in a situation</i>"]
+    P5 --> P6["6 · worlds<br/><i>a cast that comes and goes,<br/>in a situation nobody wrote</i>"]
     P3 --> P7["7 · agents<br/><i>the face of hermes</i>"]
 ```
 
@@ -143,6 +143,9 @@ should be legible from the log alone.
 | work | design | size |
 |---|---|---|
 | Director as stream middleware: filter, rewrite, broadcast, address, author | [world-scripting](todo/world-scripting.md) | 1 week |
+| A cast that comes and goes: `world.spawn` / `world.release`, stable ids, arrival and departure as events | [world-scripting](todo/world-scripting.md) | 1 week |
+| Global addressing: `plugin/character` as identity, the short name as the address | [character-packages](todo/character-packages.md) | 2 days |
+| `llm.run(tier, {tools = …})` — a director model holding world verbs, bounded by a call budget | [world-scripting](todo/world-scripting.md) | 4 days |
 | `llm.ask(tier, …)` from Luau, over coroutines; nil on refusal | [world-scripting](todo/world-scripting.md) | 3 days |
 | `llm.stream` as a sink that is also a source | [world-scripting](todo/world-scripting.md) | 2 days |
 | `world.capability{…}` — per-character availability, schema cap, bounded `on_call` | [world-scripting](todo/world-scripting.md) | 1 week |
@@ -152,6 +155,11 @@ should be legible from the log alone.
 
 **The law that governs the whole phase:** a world authors events and offers verbs. It never authors
 a character's action. Philosophy rule 7.
+
+**What it is for:** a model holding `spawn`, `release`, `tell` and `broadcast` can stage an evening
+— bring Squidward in, make the grill smell wrong, put the lights out — and seven independent minds
+answer it in their own voices. That is an episode nobody wrote, including the director, and it is
+the whole reason for running language models instead of dialogue trees.
 
 ---
 
