@@ -1,6 +1,7 @@
 # Talking to him
 
-**Status:** not started. **Why:** clicking him currently prints a line to stdout and nothing else.
+**Status:** the message path is built — `lilguy say "…"` reaches them at once, and `--to` decides
+who was addressed. What is left is the box: clicking him still prints a line to stdout.
 
 Click the guy, type something, he answers. The obvious feature, with one genuinely interesting
 decision inside it.
@@ -64,10 +65,12 @@ talking *to* him rather than opening a dialog.
 
 ## Work
 
-1. `Observation::Told { text }`, and a `lilguy say` that pushes one through the inbox.
-2. Quantiser: a `Told` observation forces `take()` to return on the next tick regardless of window.
-3. Prompt: one line in the `awareness` layer saying they can type at you and that an answer is
-   optional.
+1. ~~`Observation::Told { text }`, and a `lilguy say` that pushes one through the inbox.~~ Done, and
+   it carries a `to`, so a cast can be addressed one at a time.
+2. ~~Quantiser: a `Told` observation forces `take()` to return on the next tick.~~ Done — for the
+   addressee. The rest of the room hears it at their own pace, which is right.
+3. ~~Prompt: one line in `awareness` saying they can type at you and that an answer is optional.~~
+   Done.
 4. Input surface (route 2), reusing the bubble renderer.
 5. Click on him opens it; Escape and click-away close it.
 

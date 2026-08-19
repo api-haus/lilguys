@@ -67,6 +67,8 @@ pub struct App {
     fps: f32,
     fps_window: Instant,
     input_region: Option<Vec<[i32; 4]>>,
+    /// When anybody last spoke aloud. One clock for the whole cast.
+    last_spoke: Option<Instant>,
     pub show_hud: bool,
 }
 
@@ -110,6 +112,7 @@ impl App {
             fps: 0.0,
             fps_window: Instant::now(),
             input_region: None,
+            last_spoke: None,
             show_hud,
         }
     }
@@ -197,9 +200,6 @@ impl App {
         for intent in &reaction.intents {
             let name = self.guys[who].name.clone();
             println!("[*] {name} · {}", intent.summary());
-            if let Some(o) = self.guys[who].witnessed(intent) {
-                witnessed.push(o);
-            }
             match intent {
                 Intent::React { emotion, intensity, hold } => {
                     self.guys[who].body.feel(*emotion, *intensity, *hold)
@@ -208,9 +208,10 @@ impl App {
                     self.guys[who].thought = Some((Instant::now(), *hold, text.clone()))
                 }
                 Intent::Gesture { gesture } => self.guys[who].body.perform(*gesture),
-                Intent::Speak { text } => {
-                    if !self.guys[who].voice.say(text) {
+                Intent::Speak { text, .. } => {
+                    if !self.floor_allows(&name) || !self.guys[who].voice.say(text) {
                         println!("    ({name} could not speak just then)");
+                        continue;
                     }
                 }
                 Intent::Focus { target, linger } => {
@@ -219,6 +220,7 @@ impl App {
                     }
                 }
             }
+            witnessed.push(intent.clone());
         }
         let guy = &mut self.guys[who];
         for why in &reaction.rejected {
@@ -229,15 +231,36 @@ impl App {
         }
         guy.last_reaction = Some(reaction);
 
-        // Nobody witnesses their own action; they already know they did it.
-        for (i, other) in self.guys.iter_mut().enumerate() {
+        // Nobody witnesses their own action; they already know they did it. An action that never
+        // happened is witnessed by nobody either, which is why the floor is enforced above.
+        for i in 0..self.guys.len() {
             if i == who {
                 continue;
             }
-            for o in &witnessed {
-                other.bus.push(o.clone());
+            let listener = self.guys[i].name.clone();
+            let seen: Vec<_> = witnessed
+                .iter()
+                .filter_map(|intent| self.guys[who].witnessed_by(intent, &listener))
+                .collect();
+            for o in seen {
+                self.guys[i].bus.push(o);
             }
         }
+    }
+
+    /// The cast shares one floor on speech. Faces, thoughts and movement are free and are never
+    /// held back — this exists so a room of six is not a room that will not shut up.
+    fn floor_allows(&mut self, who: &str) -> bool {
+        let floor = self.config.mind.speech_floor;
+        if let Some(last) = self.last_spoke {
+            if last.elapsed() < floor {
+                let gap = last.elapsed().as_secs_f32();
+                crate::log::note("floor", &format!("{who} held back — somebody spoke {gap:.0}s ago"));
+                return false;
+            }
+        }
+        self.last_spoke = Some(Instant::now());
+        true
     }
 
     /// A surviving observation reads on the face, never as speech.
@@ -488,6 +511,7 @@ pub fn reflex(what: &Observation) -> (Emotion, f32, f32) {
         ),
         // Being spoken to shows on the face before anybody works out what to say back.
         Observation::Told { .. } => (Emotion::Curious, 0.6, 6.0),
+        Observation::Witnessed { .. } => (Emotion::Curious, 0.35, 5.0),
         Observation::Presence { present: true } => (Emotion::Pleased, 0.55, 6.0),
         Observation::Presence { present: false } => (Emotion::Sleepy, 0.7, 30.0),
         Observation::Workspace { .. } => (Emotion::Curious, 0.30, 3.0),

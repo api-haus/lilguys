@@ -1,7 +1,8 @@
 # A cast, not a mascot
 
-**Status:** the roster is built; the social layer is a first cut. This page is what is still
-missing and what it implies.
+**Status:** the roster is built, they have their own voices, they can address each other by name,
+and one floor holds the whole cast to a minimum silence. What is left is spatial: they still drift
+through one another and cannot see where anybody is.
 
 Any number of guys share one surface. Each has its own body, gate, quantiser, context window, voice
 queue and — if you want — its own model. Adding one is a `[[guys]]` block. Nothing about the design
@@ -15,6 +16,7 @@ character = "graybox"
 [[guys]]
 character = "spongebob"
 provider = "haiku"        # this one may think with a different model entirely
+voice = "espeak:en-us+f5" # and sound nothing like the other one
 ```
 
 ## What is shared and what is not
@@ -24,7 +26,7 @@ provider = "haiku"        # this one may think with a different model entirely
 | the layer surface and the renderer | body, pose, avatar, palette |
 | the sensors: wayland, MPRIS, the inbox | attention gate, novelty and dwell state |
 | the compositor, the pointer, window geometry | quantiser, context window, token budget |
-| the prompt layers except `persona` | the persona layer, and the model behind it |
+| the prompt layers except `persona` | the persona layer, the model, and the voice |
 
 The gate being per-guy is the interesting one. Two of them watching the same desktop rule on it
 separately, so one may be mid-dwell on something the other discarded ten minutes ago. They diverge
@@ -35,13 +37,13 @@ without anything being written to make them diverge.
 When one enacts an intent, the others receive it as an observation:
 
 ```
-- SpongeBob said something — "I'm ready!"
+- SpongeBob said to you — "I made Krabby Patties and caught jellyfish today!"
 - lil looks amused
 ```
 
 It arrives on the same stream as a window focus and a hunger pang, because
 [philosophy.md](../philosophy.md) says there is one stream. Nobody witnesses their own action —
-they already know they did it.
+they already know they did it — and nobody witnesses an action that was held back, either.
 
 A face is only witnessed above intensity 0.5. A flicker is nobody else's business, and reporting
 every micro-expression would drown two guys in each other.
@@ -66,34 +68,45 @@ whole time. Three things stopped it becoming conversation:
 
 ## What is missing
 
-1. **Per-guy voices.** The `voice` field exists on a character and a guy and is not yet read. Two
-   characters sharing one voice is the single most obvious thing wrong right now. It wants a voice
-   *engine* choice per guy, not just a model, since a character may want espeak's flatness.
-2. **They cannot address each other.** `speak` goes to the room. There is no way for SpongeBob to
-   say something *to* lil, and no way for lil to know he was addressed. Probably a `to` field on
-   `speak`, resolved by name, producing a differently-worded observation for the addressee.
-3. **They do not know who else is here.** Nothing in the prompt says another creature exists. The
-   `awareness` layer should name the others, or the first time one appears in the stream is
-   genuinely confusing.
-4. **No spatial awareness of each other.** They can overlap and drift through one another. Knowing
+1. **No spatial awareness of each other.** They overlap and drift through one another. Knowing
    another guy's position would let `focus` take a name, and would let a reflex fire on proximity —
    which is the cheapest possible source of social behaviour.
-5. **Turn budgets are per guy, so cost is linear in cast size.** Five guys is five times the
+2. **Turn budgets are per guy, so cost is linear in cast size.** Five guys is five times the
    tokens. That is fine on a local model and expensive on a hosted one, and the config gives no way
-   to say "the whole cast may spend N per hour".
-6. **Conversation feedback loops.** Two guys who each react to the other reacting will ping-pong.
-   The novelty window damps it, but nothing prevents it. A cheap guard: an observation about
-   another guy cannot itself be witnessed by a third, so chatter does not amplify across a cast.
+   to say "the whole cast may spend N per hour". `speech_floor` bounds how often anybody *speaks*;
+   nothing yet bounds how often everybody *thinks*.
+3. **Conversation feedback loops are damped, not prevented.** Two guys who each react to the other
+   reacting will ping-pong. `per_source_cap` is what holds it: a witnessed action carries the actor
+   as its source, so one guy monologuing is throttled without silencing the rest. That is a damper
+   and not a guard, and a cast of six has not been run against it.
+4. **The roster is fixed at startup.** Characters cannot yet arrive or leave while it runs, which
+   is what a world needs — see [world-scripting.md](world-scripting.md).
 
-## Worth being careful about
+## What landed, and what it took
 
-**The pace was tuned for one.** A forty-five second quantum with one guy means someone speaks
-rarely. With six guys on the same quantum, something happens every seven seconds on average, and
-the restraint that makes a single creature good company becomes a room that will not shut up.
+Worth recording, because none of it was the models' fault and all of it looked like it was.
 
-The cast should probably share a *floor* on silence rather than each keeping its own — a global
-minimum gap between anybody speaking, independent of how many are thinking. That is a small change
-and it should land before anyone tries the full Bikini Bottom.
+1. **Silence was self-sustaining.** An empty slice was never sent, so nothing produced nothing:
+   nobody acted, so nobody had anything to react to, forever. `restless_after` breaks the loop — a
+   guy who has been quiet that long gets a slice saying so, and a character with a personality does
+   something in character with nothing.
+2. **Nothing told them anybody else existed.** A line saying another creature did something arrived
+   with no idea who that was. The `awareness` strand now names the others and says they are company,
+   not scenery.
+3. **Being addressed was indistinguishable from overhearing.** `speak` now takes an optional `to`,
+   and the same sentence reaches the one named as *said to you* and everybody else as *said to lil*.
+   The prompt says that being addressed by name is the one thing that usually deserves a voice back
+   — and that line carries `{others}`, so it vanishes for a character who is alone.
+4. **Two of them shared one voice.** A voice now belongs to a character: `"engine:voice"`, an
+   engine, or a voice, resolved guy → character → `[voice]`. SpongeBob is on espeak because alba
+   cannot be him.
+5. **The pace was tuned for one.** `speech_floor` is a floor under the whole cast rather than one
+   guy, so six of them on a forty-five second quantum is not a room that will not shut up. Faces,
+   thoughts and movement are free and are never held back by it.
+
+Witnessing is exteroception, incidentally, and modelling it as a feeling was a category error: a
+creature acting in front of you is the world happening, not something you feel. It reads as
+`SpongeBob said to you — "…"` rather than `you feel SpongeBob said something`.
 
 ## Why this is worth doing
 

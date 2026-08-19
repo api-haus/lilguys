@@ -128,7 +128,7 @@ pub fn run(on: &mut dyn FnMut(&Check)) -> Report {
     let reachable = provider.status != Status::Fail;
     emit(provider, &mut checks);
     emit(tools(&config, reachable), &mut checks);
-    emit(voice(&config), &mut checks);
+    emit(voice(&config, dir), &mut checks);
     emit(senses(&config), &mut checks);
     emit(pace(&config), &mut checks);
     emit(logging(&config), &mut checks);
@@ -262,30 +262,60 @@ fn tools(config: &Config, provider_ok: bool) -> Check {
     }
 }
 
-fn voice(config: &Config) -> Check {
+fn voice(config: &Config, dir: Option<&Path>) -> Check {
     if !config.voice.enabled {
         return warn("voice", "disabled — everything else still works, silently")
             .fix("set [voice] enabled = true");
     }
-    let Some(engine) = config.voice.engines.get(&config.voice.engine) else {
-        return fail("voice", format!("no [voice.engines.{}]", config.voice.engine))
-            .fix("`lilguy voice list` names the engines this machine has");
+    let roster = config.roster(dir).unwrap_or_default();
+    let mut sounds: Vec<String> = Vec::new();
+    let mut wrong: Vec<Check> = Vec::new();
+    for (guy, character) in &roster {
+        let who = guy.name.clone().unwrap_or_else(|| character.name.clone());
+        let spec = guy.voice.as_deref().or(character.voice.as_deref());
+        let (engine, voice) = config.voice.resolve(spec);
+        sounds.push(format!("{who} {engine}/{}", short(&voice)));
+        if let Err(c) = usable(config, &engine, &voice) {
+            wrong.push(c);
+        }
+    }
+    if let Some(c) = wrong.into_iter().next() {
+        return c;
+    }
+    match sounds.is_empty() {
+        true => ok("voice", format!("{} · {}", config.voice.engine, config.voice.voice)),
+        false => ok("voice", sounds.join(" · ")),
+    }
+}
+
+/// One resolved voice: an engine that exists, a binary on PATH, and a model where one is named.
+fn usable(config: &Config, engine: &str, voice: &str) -> Result<(), Check> {
+    let Some(e) = config.voice.engines.get(engine) else {
+        return Err(fail("voice", format!("no [voice.engines.{engine}]"))
+            .fix("`lilguy voice list` names the engines this machine has"));
     };
-    let Some(bin) = engine.synth.first() else {
-        return fail("voice", format!("[voice.engines.{}] has no synth command", config.voice.engine));
+    let Some(bin) = e.synth.first() else {
+        return Err(fail("voice", format!("[voice.engines.{engine}] has no synth command")));
     };
-    let detail = format!("{} · {} · {bin}", config.voice.engine, config.voice.voice);
     if !crate::service::which(bin) {
-        return fail("voice", format!("{detail} not on PATH"))
-            .fix(format!("install {bin}, or `lilguy voice use <engine>`"));
+        return Err(fail("voice", format!("{engine}: {bin} is not on PATH"))
+            .fix(format!("install {bin}, or `lilguy voice use <engine>`")));
     }
     // A missing voice model fails at the first word rather than at startup, which reads as a bug.
-    let model = expand(&config.voice.voice);
-    if config.voice.voice.contains('/') && !model.is_file() {
-        return fail("voice", format!("{detail} — no voice model at {}", model.display()))
-            .fix("fetch one from https://huggingface.co/rhasspy/piper-voices");
+    let model = expand(voice);
+    if voice.contains('/') && !model.is_file() {
+        return Err(fail("voice", format!("{engine}: no voice model at {}", model.display()))
+            .fix("fetch one from https://huggingface.co/rhasspy/piper-voices"));
     }
-    ok("voice", detail)
+    Ok(())
+}
+
+/// A voice is either a name or a path to a model; a path reads better as its file name.
+fn short(voice: &str) -> String {
+    match voice.contains('/') {
+        true => Path::new(voice).file_stem().unwrap_or_default().to_string_lossy().into_owned(),
+        false => voice.to_string(),
+    }
 }
 
 fn expand(path: &str) -> PathBuf {

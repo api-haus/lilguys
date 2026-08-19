@@ -4,7 +4,11 @@ use crate::config::{Engine, Voice as VoiceConfig};
 use anyhow::{bail, Context, Result};
 use std::io::Write;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
+
+/// Distinguishes one speaker's scratch wav from another's when two of them talk at once.
+static VOICES: AtomicUsize = AtomicUsize::new(0);
 
 /// Whether a lilguy is mid-sentence, so the mouth can move and a second utterance can be refused.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -18,32 +22,44 @@ pub struct Voice {
     tx: Option<mpsc::Sender<String>>,
     queued: usize,
     limit: usize,
+    /// What this one sounds like, for the HUD and for `lilguy doctor`.
+    pub sound: String,
 }
 
 impl Voice {
+    /// One voice for one character. `spec` is that character's own — `"engine:voice"`, an engine,
+    /// or a voice — and anything it leaves out comes from `[voice]`.
+    ///
     /// A disabled or unknown engine yields a voice that silently accepts and drops everything, so
     /// no caller needs to know whether speech is configured.
-    pub fn new(config: &VoiceConfig, done: calloop::channel::Sender<State>) -> Self {
+    pub fn new(
+        config: &VoiceConfig, spec: Option<&str>, done: calloop::channel::Sender<State>,
+    ) -> Self {
+        let (engine_name, voice) = config.resolve(spec);
+        let sound = format!("{engine_name}/{voice}");
+        let mute = |why: String| {
+            eprintln!("voice {sound}: {why}");
+            Self { tx: None, queued: 0, limit: 0, sound: sound.clone() }
+        };
         if !config.enabled {
-            return Self { tx: None, queued: 0, limit: 0 };
+            return Self { tx: None, queued: 0, limit: 0, sound: "off".into() };
         }
-        let Some(engine) = config.engines.get(&config.engine).cloned() else {
-            eprintln!("voice engine '{}' has no [voice.engines.{}] entry", config.engine, config.engine);
-            return Self { tx: None, queued: 0, limit: 0 };
+        let Some(engine) = config.engines.get(&engine_name).cloned() else {
+            return mute(format!("no [voice.engines.{engine_name}] entry"));
         };
         if engine.synth.is_empty() {
-            eprintln!("voice engine '{}' has an empty synth command", config.engine);
-            return Self { tx: None, queued: 0, limit: 0 };
+            return mute(format!("[voice.engines.{engine_name}] has an empty synth command"));
         }
 
         let (tx, rx) = mpsc::channel::<String>();
         let cfg = config.clone();
+        let id = VOICES.fetch_add(1, Ordering::Relaxed);
         std::thread::Builder::new()
             .name("voice".into())
             .spawn(move || {
                 while let Ok(text) = rx.recv() {
                     let _ = done.send(State::Speaking);
-                    if let Err(e) = utter(&engine, &cfg, &text) {
+                    if let Err(e) = utter(&engine, &cfg, &voice, id, &text) {
                         eprintln!("voice: {e:#}");
                     }
                     let _ = done.send(State::Silent);
@@ -51,7 +67,7 @@ impl Voice {
             })
             .ok();
 
-        Self { tx: Some(tx), queued: 0, limit: config.queue_limit.max(1) }
+        Self { tx: Some(tx), queued: 0, limit: config.queue_limit.max(1), sound }
     }
 
     pub fn available(&self) -> bool {
@@ -77,15 +93,16 @@ impl Voice {
     }
 }
 
-fn utter(engine: &Engine, config: &VoiceConfig, text: &str) -> Result<()> {
-    let out = std::env::temp_dir().join(format!("lilguys-{}.wav", std::process::id()));
+fn utter(engine: &Engine, config: &VoiceConfig, voice: &str, id: usize, text: &str) -> Result<()> {
+    // Two of them speaking at once must not write over each other's scratch file.
+    let out = std::env::temp_dir().join(format!("lilguys-{}-{id}.wav", std::process::id()));
     let out_str = out.to_string_lossy().to_string();
     // A model path in a config file is written with a tilde; exec never expands one.
-    let voice = match config.voice.strip_prefix("~/") {
+    let voice = match voice.strip_prefix("~/") {
         Some(rest) => dirs::home_dir().map(|h| h.join(rest).to_string_lossy().into_owned()),
         None => None,
     }
-    .unwrap_or_else(|| config.voice.clone());
+    .unwrap_or_else(|| voice.to_string());
     let subst = |arg: &String| -> String {
         arg.replace("{text}", text)
             .replace("{voice}", &voice)

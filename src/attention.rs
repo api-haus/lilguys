@@ -190,7 +190,11 @@ impl Attention {
             // worth a token on their own.
             // A feeling is the body's own immediate feedback and costs nothing to answer. Budget
             // exists to protect tokens; rationing a free response only makes the body feel dead.
-            Observation::Feeling(_) | Observation::Told { .. } => Verdict::Emote,
+            // A creature acting in front of you is answered on the face and for free, like a
+            // feeling. What stops a cast amplifying is the per-source cap above, not a budget.
+            Observation::Feeling(_) | Observation::Told { .. } | Observation::Witnessed { .. } => {
+                Verdict::Emote
+            }
             // Ambient changes colour the mood too, but they arrive from outside and can flood, so
             // they are rationed. Either way both ride along in the next slice for the mind.
             Observation::Presence { .. } | Observation::Workspace { .. } => {

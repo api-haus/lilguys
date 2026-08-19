@@ -30,9 +30,11 @@ Where it already is, for reference.
 - Attention gate — novelty, dwell, budget — and the quantiser
 - Reactor: OpenAI-compatible client, auto-compacting context, five capabilities
 - Layered prompt: `rules` · `awareness` · `self` · `persona`
-- Voice as a command template; piper and espeak
-- A roster of guys who witness each other
-- `turns.jsonl` and `events.jsonl`; `--check`, `--print-config`, `--print-prompt`
+- Voice as a command template; piper and espeak, one voice per character
+- A roster of guys who witness each other, address each other by name, and share a floor on speech
+- `turns.jsonl` and `events.jsonl`; `--print-config`, `--print-prompt`
+- `lilguy doctor · start · stop · status · say`, all with `--json`
+- A message, which is the one thing that closes the current slice instead of waiting for it
 
 ---
 
@@ -43,18 +45,15 @@ characters on their desktop that they can talk to.
 
 | work | design | size |
 |---|---|---|
-| `lilguy doctor` — `--check` restructured, `--json`, one line per check | [lilguy-cli](todo/lilguy-cli.md) | 1 day |
-| `lilguy start/stop/status` over the systemd unit | [lilguy-cli](todo/lilguy-cli.md) | half a day |
-| `lilguy say "…"` over the inbox — also the test hook for everything after | [talking-to-him](todo/talking-to-him.md) | hours |
-| `Observation::Told`, and a message closing the current slice immediately | [talking-to-him](todo/talking-to-him.md) | 1 day |
 | Input surface: click him, type, Escape closes; reuses the bubble renderer | [talking-to-him](todo/talking-to-him.md) | 2 days |
-| Per-guy voices — the field exists and is not read | [many-guys](todo/many-guys.md) | half a day |
-| A shared floor on silence, so a cast is not a room that will not shut up | [many-guys](todo/many-guys.md) | half a day |
-| Tune the speak preference for company — it is set for a solo buddy | [many-guys](todo/many-guys.md) | half a day |
-| `speak` gains an optional `to`, so they can address each other | [many-guys](todo/many-guys.md) | 1 day |
+| `lilguy provider list/use`, `lilguy model pull`, `lilguy voice list/use/test` | [lilguy-cli](todo/lilguy-cli.md) | 2 days |
 | `lilguy setup` — probe providers, probe **native tool calls**, pull a model, fetch a voice, install the unit | [lilguy-cli](todo/lilguy-cli.md) | 3 days |
 
-**Why first:** everything else is worth more if somebody else can run it, and `lilguy say` unblocks
+Landed: `doctor`, `start/stop/status`, `say`, `Observation::Told` and the slice it cuts short,
+per-guy voices, the shared floor on silence, `speak`'s optional `to`, and the prompt tuning that
+makes being addressed worth answering.
+
+**Why first:** everything else is worth more if somebody else can run it, and `lilguy say` unblocked
 the message path that Phase 7 needs.
 
 ---

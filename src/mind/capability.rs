@@ -46,7 +46,7 @@ pub enum Intent {
     React { emotion: Emotion, intensity: f32, hold: f32 },
     Think { text: String, hold: f32 },
     Gesture { gesture: Gesture },
-    Speak { text: String },
+    Speak { text: String, to: Option<String> },
     Focus { target: FocusTarget, linger: f32 },
 }
 
@@ -58,7 +58,12 @@ impl Intent {
             }
             Intent::Think { text, .. } => format!("think \"{}\"", crate::sensors::clip(text, 40)),
             Intent::Gesture { gesture } => format!("gesture {}", gesture.name()),
-            Intent::Speak { text } => format!("speak \"{}\"", crate::sensors::clip(text, 40)),
+            Intent::Speak { text, to: None } => {
+                format!("speak \"{}\"", crate::sensors::clip(text, 40))
+            }
+            Intent::Speak { text, to: Some(who) } => {
+                format!("speak to {who} \"{}\"", crate::sensors::clip(text, 40))
+            }
             Intent::Focus { target, .. } => match target {
                 FocusTarget::Window { r#match: m } => format!("focus window {m}"),
                 FocusTarget::Pointer => "focus pointer".into(),
@@ -97,6 +102,8 @@ struct GestureArgs {
 #[derive(Deserialize)]
 struct SpeakArgs {
     text: String,
+    #[serde(default)]
+    to: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -193,7 +200,12 @@ pub fn parse(name: &str, arguments: &str) -> Result<Intent, String> {
         }
         "speak" => {
             let a: SpeakArgs = serde_json::from_str(args).map_err(|e| e.to_string())?;
-            Ok(Intent::Speak { text: vet_speech(&a.text)? })
+            let to = a.to.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+            // A name reaches a person's ears too, so it is vetted like anything else spoken.
+            if let Some(name) = to.as_deref() {
+                vet_leakage(name)?;
+            }
+            Ok(Intent::Speak { text: vet_speech(&a.text)?, to })
         }
         "focus" => {
             let a: FocusArgs = serde_json::from_str(args).map_err(|e| e.to_string())?;
@@ -249,10 +261,12 @@ pub fn schemas() -> Value {
             "required": ["text"]
         })),
         tool("speak", "Say something out loud. This interrupts. Keep it under fifteen words and \
-             use it rarely — silence is almost always better.", json!({
+             use it rarely — silence is almost always better. Answering somebody who spoke to you \
+             is the exception: that is a conversation, and it is what a voice is for.", json!({
             "type": "object",
             "properties": {
-                "text": { "type": "string", "description": "what to say, one short sentence" }
+                "text": { "type": "string", "description": "what to say, one short sentence" },
+                "to": { "type": "string", "description": "the name of whoever you are answering, if you are answering somebody. Everyone hears it either way." }
             },
             "required": ["text"]
         })),
@@ -303,7 +317,19 @@ mod tests {
     #[test]
     fn speech_accepts_a_remark() {
         let ok = parse("speak", r#"{"text": "  \"that video is long\"  "}"#).unwrap();
-        assert_eq!(ok, Intent::Speak { text: "that video is long".into() });
+        assert_eq!(ok, Intent::Speak { text: "that video is long".into(), to: None });
+    }
+
+    #[test]
+    fn speech_may_be_addressed_to_one_of_the_others() {
+        let ok = parse("speak", r#"{"text": "you are wrong", "to": " SpongeBob "}"#).unwrap();
+        assert_eq!(
+            ok,
+            Intent::Speak { text: "you are wrong".into(), to: Some("SpongeBob".into()) }
+        );
+        // An empty name is nobody, not somebody called "".
+        let room = parse("speak", r#"{"text": "hello", "to": "  "}"#).unwrap();
+        assert_eq!(room, Intent::Speak { text: "hello".into(), to: None });
     }
 
     #[test]

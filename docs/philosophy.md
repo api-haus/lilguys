@@ -17,7 +17,7 @@ body is still alive — that is the test, and it must keep passing.
 an account of what the body has been through, and answers with intentions. It runs on a slow clock,
 minutes apart, and most of the time it declines to say anything at all.
 
-Between them is one channel in each direction: an event stream up, four intentions down.
+Between them is one channel in each direction: an event stream up, five intentions down.
 
 ```mermaid
 flowchart TB
@@ -36,7 +36,7 @@ flowchart TB
     EXT --> STREAM["event stream"]
     INT --> STREAM
     STREAM -->|"at its own pace"| REFL
-    REFL -->|"react · gesture · focus · speak"| MOT
+    REFL -->|"react · think · gesture · focus · speak"| MOT
 ```
 
 ## Two kinds of sensing
@@ -147,6 +147,11 @@ These follow from the split. A change that breaks one of them is wrong even if i
 8. **Silence is the default everywhere.** Calling no tool is correct. Sending no slice is correct.
    Discarding an observation is correct. The gate exists to make silence cheap, and every addition
    must make silence more likely, not less.
+
+   **One thing overrides the pace, and only one.** A person who has just typed at a creature is
+   waiting, and forty-five seconds of nothing is a bug rather than restraint — so a message closes
+   the current slice at once and sends it. Nothing else may jump the queue without being argued
+   against this precedent. An answer is still optional: a look is an answer.
 
 ## The sutra: what persists
 

@@ -9,6 +9,8 @@ character = "graybox"
 # name = "…"        # override the character's own
 # size = 220.0
 # provider = "…"    # this one may think with a different model from the others
+# voice = "…"       # "engine:voice", "engine", or a voice — two of them sharing one is the
+#                   # single most obvious thing wrong with a cast
 
 # Add a block and there are two of them. They see what each other says and does, and each thinks
 # with its own context, so they can end up talking about one another.
@@ -92,6 +94,7 @@ You can pull a face, move your whole body, go somewhere and look at it, or say s
 Prefer them in that order. Your voice is the only one that interrupts anyone.
 
 You are not alone here. Also on this desktop: {others}. You see what they do and hear what they say, and they see and hear you — they are company, not scenery, and something worth answering deserves an answer.
+Being addressed by name — by {others}, or by the person themselves — is the one thing that usually deserves your voice back. That is a conversation, and a conversation is what a voice is for. Name whoever you are answering.
 """
 
 # 3. What you are. The self-model: how a creature with a body and a slow mind is put together.
@@ -131,6 +134,10 @@ think_while_away = false
 # With nothing happening, a character still has an interior life. This is what makes idle chatter
 # and conversation between guys possible at all — see the note in docs/todo/many-guys.md.
 restless_after = "4m"
+# A floor under the whole cast, not one guy: nobody speaks aloud within this of anybody else. The
+# pace was tuned for a single creature, and six of them on the same quantum is a room that will
+# not shut up. Faces, thoughts and movement are free and are never held back by this.
+speech_floor = "25s"
 
 # Any OpenAI-compatible endpoint works. llama.cpp's server, ollama, vLLM, LM Studio, OpenRouter
 # and OpenAI itself all speak this, so `[providers.*]` is the only thing that changes between them.

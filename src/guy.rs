@@ -143,28 +143,29 @@ impl Guy {
         }
     }
 
-    /// What the others should learn about an action this one just took. Doing something in front
-    /// of somebody is an event in their world, which is the whole of how a roster is social.
-    pub fn witnessed(&self, intent: &Intent) -> Option<Observation> {
+    /// What one particular onlooker learns about an action this one just took. Doing something in
+    /// front of somebody is an event in their world, which is the whole of how a roster is social.
+    ///
+    /// Being addressed is not overhearing, so the same sentence reads differently to the one it
+    /// was aimed at.
+    pub fn witnessed_by(&self, intent: &Intent, listener: &str) -> Option<Observation> {
         let (state, detail) = match intent {
-            Intent::Speak { text } => ("said something", format!("\"{text}\"")),
-            Intent::Think { text, .. } => ("is thinking", format!("\"{text}\"")),
-            Intent::Gesture { gesture } => ("made a gesture", gesture.name().to_string()),
+            Intent::Speak { text, to: None } => ("said something".into(), format!("\"{text}\"")),
+            Intent::Speak { text, to: Some(who) } if who.eq_ignore_ascii_case(listener) => {
+                ("said to you".into(), format!("\"{text}\""))
+            }
+            Intent::Speak { text, to: Some(who) } => {
+                (format!("said to {who}"), format!("\"{text}\""))
+            }
+            Intent::Think { text, .. } => ("is thinking".into(), format!("\"{text}\"")),
+            Intent::Gesture { gesture } => ("made a gesture".into(), gesture.name().to_string()),
             // A face is noticed only when it is a strong one; a flicker is nobody else's business.
             Intent::React { emotion, intensity, .. } if *intensity >= 0.5 => {
-                ("looks", emotion.name().to_string())
+                (format!("looks {}", emotion.name()), String::new())
             }
             _ => return None,
         };
-        Some(Observation::Feeling(crate::sensors::Feeling {
-            source: self.name.clone(),
-            state: format!("{} {state}", self.name),
-            detail,
-            tone: None,
-            intensity: 0.35,
-            hold: 5.0,
-            reflective: false,
-        }))
+        Some(Observation::Witnessed { who: self.name.clone(), did: state, detail })
     }
 
     pub fn expression_of(&self, emotion: Emotion) -> &'static str {

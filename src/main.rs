@@ -125,7 +125,9 @@ fn main() -> Result<()> {
             })
             .map_err(|e| anyhow::anyhow!("mind channel: {e}"))?;
 
-        let voice = voice::Voice::new(&cfg.voice, voice_tx);
+        // A guy's own voice, then their character's, then whatever [voice] says.
+        let spec = entry.voice.as_deref().or(character.voice.as_deref());
+        let voice = voice::Voice::new(&cfg.voice, spec, voice_tx);
         let to_mind = match cfg.mind.enabled {
             true => {
                 let provider = entry.provider.clone().unwrap_or_else(|| cfg.mind.provider.clone());

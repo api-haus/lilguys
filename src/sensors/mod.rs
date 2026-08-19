@@ -18,6 +18,9 @@ pub enum Observation {
     /// Something began or changed playing. `url` is the whole point: MPRIS hands over a YouTube
     /// watch id for free, so the transcript never needs a single pixel.
     Media { player: String, title: String, artist: String, url: String, playing: bool },
+    /// Another character did something in front of this one. Seeing a creature act is the world
+    /// happening, not a feeling about it, so it is exteroception like any window.
+    Witnessed { who: String, did: String, detail: String },
     /// The person typed something at them. Everybody in the room hears it; `to` names who it was
     /// meant for, if anyone.
     Told { text: String, to: Option<String> },
@@ -97,6 +100,7 @@ impl Observation {
             Observation::Workspace { name } => format!("ws:{name}"),
             Observation::Presence { present } => format!("presence:{present}"),
             Observation::Media { url, title, .. } => format!("media:{url}:{title}"),
+            Observation::Witnessed { who, did, detail } => format!("saw:{who}:{did}:{detail}"),
             Observation::Told { text, .. } => format!("told:{text}"),
             Observation::Feeling(f) => format!("feeling:{}:{}", f.source, f.state),
         }
@@ -111,6 +115,8 @@ impl Observation {
             Observation::Workspace { .. } => "workspace".into(),
             Observation::Presence { .. } => "presence".into(),
             Observation::Media { player, .. } => format!("media:{player}"),
+            // Per-source, so one guy monologuing is damped without silencing the rest of the cast.
+            Observation::Witnessed { who, .. } => format!("guy:{who}"),
             Observation::Told { .. } => "told".into(),
             Observation::Feeling(f) => format!("feeling:{}", f.source),
         }
@@ -131,6 +137,12 @@ impl Observation {
                 clip(artist, 16),
                 clip(title, 26)
             ),
+            Observation::Witnessed { who, did, detail } if detail.is_empty() => {
+                format!("{who} {did}")
+            }
+            Observation::Witnessed { who, did, detail } => {
+                format!("{who} {did} — {}", clip(detail, 60))
+            }
             Observation::Told { text, to: None } => format!("they said — \"{text}\""),
             Observation::Told { text, to: Some(who) } => format!("they said to {who} — \"{text}\""),
             Observation::Feeling(f) if f.reflective => {

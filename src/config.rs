@@ -312,6 +312,10 @@ pub struct Mind {
     /// anything to react to. Zero disables idling entirely.
     #[serde(with = "humantime_serde")]
     pub restless_after: Duration,
+    /// Minimum gap between anybody speaking aloud, shared by the whole cast. Six of them on a
+    /// forty-five second quantum is a room that will not shut up; this is the floor under it.
+    #[serde(with = "humantime_serde")]
+    pub speech_floor: Duration,
 }
 
 /// Every provider speaks the OpenAI chat-completions wire format: llama.cpp's server, ollama,
@@ -357,7 +361,7 @@ impl Default for Provider {
 #[serde(deny_unknown_fields)]
 pub struct Voice {
     pub enabled: bool,
-    /// Key into `[voice.engines.*]`.
+    /// Key into `[voice.engines.*]`. A guy or a character may name a different one.
     pub engine: String,
     /// Voice or model name, substituted into the engine's command as `{voice}`.
     pub voice: String,
@@ -371,6 +375,27 @@ pub struct Voice {
 /// A TTS pipeline as a command line. `{text}` `{voice}` `{speed}` `{out}` are substituted;
 /// `{out}` is a temporary wav path. This is what makes piper, kokoro, F5-TTS, XTTS and espeak-ng
 /// all the same thing to lilguys.
+impl Voice {
+    /// Resolves what one character sounds like: `"engine:voice"`, `"engine"`, or just a voice.
+    ///
+    /// A character wanting espeak's flatness is choosing an engine, not only a model, so the
+    /// per-guy setting has to be able to say both.
+    pub fn resolve(&self, spec: Option<&str>) -> (String, String) {
+        let Some(spec) = spec.map(str::trim).filter(|s| !s.is_empty()) else {
+            return (self.engine.clone(), self.voice.clone());
+        };
+        let (engine, voice) = match spec.split_once(':') {
+            Some((e, v)) => (e.trim(), v.trim()),
+            None if self.engines.contains_key(spec) => (spec, ""),
+            None => ("", spec),
+        };
+        (
+            (!engine.is_empty()).then(|| engine.to_string()).unwrap_or_else(|| self.engine.clone()),
+            (!voice.is_empty()).then(|| voice.to_string()).unwrap_or_else(|| self.voice.clone()),
+        )
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Engine {

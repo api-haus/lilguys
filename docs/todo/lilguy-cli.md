@@ -1,7 +1,8 @@
 # `lilguy` — the CLI that sets him up
 
-**Status:** not started. **Why:** the current install is "write a TOML by hand and know what a
-tool-calling model is".
+**Status:** `doctor`, `start`, `stop`, `status` and `say` are built. `provider`, `model`, `voice`,
+`setup`, `plugin` and `integrate` are not, so the install is still "write a TOML by hand and know
+what a tool-calling model is".
 
 Nobody is going to hand-configure this. In practice they will ask their coding agent to set it up,
 which means the real user of the installer is **another program**, and that should shape every
@@ -21,7 +22,8 @@ it is the primary interface.
 - **No prompts hidden behind a spinner.** If something needs a decision, say so on stdout and
   exit non-zero with the question in the JSON.
 
-`lilguysd --check` is the seed of `doctor` and already works; the CLI generalises it.
+`doctor` is `--check` restructured: named checks, each carrying a fix, `--json`, and a non-zero
+exit when anything failed. `lilguysd --check` prints the same report, so there is one set of checks.
 
 ## Commands
 

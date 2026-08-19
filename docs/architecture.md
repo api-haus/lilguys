@@ -30,8 +30,10 @@ flowchart LR
         VOX["voicebox"]
     end
 
+    CLI["lilguy<br/><i>say, start, doctor</i>"]
     WL --> SEN
     DB --> SEN
+    CLI -->|inbox socket| SEN
     IDLE["idle regiment<br/><i>needs no events</i>"]
     SEN --> GATE
     GATE -->|survivors| QUANT
@@ -51,7 +53,7 @@ Two properties shape every decision:
 - **Cheap things happen often, expensive things happen rarely.** The sensors are push-based and
   cost nothing. The gate is local arithmetic. Only the reactor spends tokens, and it is fed on a
   slow clock with a hard ceiling.
-- **The mind never touches pixels or protocols.** It emits four kinds of intent. Everything about
+- **The mind never touches pixels or protocols.** It emits five kinds of intent. Everything about
   how those look is below the `Avatar` trait, and everything about where the character goes is in
   the body.
 
@@ -123,6 +125,13 @@ sequenceDiagram
     Note over M,B: no speak, silence is the default
 ```
 
+**A message is the one thing that does not wait.** Every other observation may sit in the bucket
+for a whole quantum because nothing is waiting on it; a person who has just typed is. So a message
+closes the current slice immediately and sends it, with everything accumulated so far — what he was
+in the middle of noticing is exactly the context for what was just said. This is the only legitimate
+override of the pace, and anything else that wants to jump the queue is argued against this
+precedent.
+
 Every slice opens with two framing lines carrying **state rather than events** — how long the
 window was, whether the user is present, the active workspace, the focused window, and how the body
 currently is:
@@ -144,8 +153,11 @@ most of what it sees.
 ```mermaid
 stateDiagram-v2
     [*] --> Judge: observation arrives
+    Judge --> Emote: a message, never damped
     Judge --> Ignored: key seen inside novelty_window
+    Judge --> Ignored: source over per_source_cap
     Judge --> Emote: ambient (workspace, presence)
+    Judge --> Emote: another character acting
     Judge --> Pending: could matter (focus, title, media)
     Pending --> Pending: dwell not elapsed
     Pending --> Think: dwell elapsed, budget allows
@@ -165,9 +177,14 @@ Two paths reach `Verdict::Emote`, and both bypass the model:
 
 1. **A feeling** — the body's own, or a drive's through the inbox. Always answered, never rationed:
    budget protects tokens, and an expression costs none.
-2. **Ambient observations** — a workspace switch or a presence change. These colour the mood but are
+2. **A message** — somebody typed at him. Never damped, never deduplicated and never dropped: a
+   person repeating themselves means it twice, which is the opposite of nothing new.
+3. **Another character acting** — free like a feeling, because it is somebody else's whole point in
+   being here. What stops a cast amplifying is `per_source_cap`, which damps one guy monologuing
+   without silencing the rest.
+4. **Ambient observations** — a workspace switch or a presence change. These colour the mood but are
    never worth a token on their own. They can flood, so unlike feelings they are rationed.
-3. **A demoted thought** — a dwell matured, but `turns_per_hour` was already spent. Rather than
+5. **A demoted thought** — a dwell matured, but `turns_per_hour` was already spent. Rather than
    discard it, the verdict drops from Think to Emote so something visible still happens.
 
 The answer is a fixed mapping from observation to expression, applied directly to the body:
@@ -181,6 +198,8 @@ The answer is a fixed mapping from observation to expression, applied directly t
 | window retitled | curious 0.22 | 2.5 s |
 | playback started | amused 0.45 | 8 s |
 | playback stopped | neutral 0.20 | 3 s |
+| somebody typed at him | curious 0.60 | 6 s |
+| another character acted | curious 0.35 | 5 s |
 | any feeling | whatever it named | whatever it asked |
 
 **Facial only, on purpose.** A gesture is a deliberate intention and stays the mind's to decide, so
@@ -220,16 +239,25 @@ reporting on itself. Both push onto the same bus and reach the mind in the same 
 | pointer | extero | Hyprland IPC | cursor position, 14.6 µs per read |
 | geometry | extero | Hyprland IPC | window rectangles, for `focus(window)` |
 | body | intero | `locomotion.rs` | picked up, set down, arrived, out of sight |
+| others | extero | the roster | what another character just said, thought or did |
 | inbox | intero | `$XDG_RUNTIME_DIR/lilguys.sock` | any feeling any process cares to push |
+| inbox | extero | the same socket | a message typed at them, from `lilguy say` or anything else |
 
 ### 5.1 The inbox
 
-One JSON object per line, from anything that can open a unix socket:
+One JSON object per line, from anything that can open a unix socket. Two shapes go in, and which
+one a line is depends on the fields it carries — a feeling needs `source` and `state`, a message
+needs `text`:
 
 ```json
 {"source":"hunger","state":"starving","detail":"nothing since this morning",
  "tone":"concerned","intensity":0.9,"hold":40}
+{"text":"are you two getting along?","to":"SpongeBob"}
 ```
+
+A message is heard by everybody in the room. `to` decides who reads it as being addressed — that
+one answers on the next tick, the rest hear it at their own pace. `lilguy say --to …` writes
+exactly this line, which is why the message path was testable before there was anywhere to type.
 
 `tone`, `intensity` and `hold` set the immediate expression, because only the drive's author knows
 what its own signal means. A feeling is answered by the body at once and **never rationed** — it
@@ -274,21 +302,27 @@ dropped anyway — the window has to shrink either way.
 using the tool channel, lilguys reports that as an error rather than parsing around it.
 `lilguysd --check` answers this before you ever run the daemon.
 
-## 7. The four capabilities
+## 7. The five capabilities
 
-The model has exactly four tools, ordered from cheap and quiet to loud and interrupting. The system
+The model has exactly five tools, ordered from cheap and quiet to loud and interrupting. The system
 prompt says to prefer them in that order, and that calling nothing at all is a normal response.
 
 ```mermaid
 flowchart LR
-    R["react<br/><i>face only</i>"] --> G["gesture<br/><i>whole body</i>"]
+    R["react<br/><i>face only</i>"] --> T["think<br/><i>written, silent</i>"]
+    T --> G["gesture<br/><i>whole body</i>"]
     G --> F["focus<br/><i>go somewhere</i>"]
     F --> S["speak<br/><i>interrupts</i>"]
     R -.-> RD["emotion + intensity + hold<br/>eases onto Pose params"]
+    T -.-> TD["a bubble over the head<br/>nobody hears it"]
     G -.-> GD["one of eight, each with<br/>a duration and an envelope"]
     F -.-> FD["window · pointer · place · away<br/>becomes a steering target"]
-    S -.-> SD["one short sentence<br/>into the voicebox queue"]
+    S -.-> SD["one short sentence, optionally<br/>addressed, into the voicebox queue"]
 ```
+
+`speak` takes an optional `to`. Everybody hears the sentence either way; the one named reads it as
+*said to you* and the rest read it as *said to lil*, which is the whole difference between being
+addressed and overhearing.
 
 `focus` is the only one that needs the outside world: `focus(window, match: "zen")` looks the
 rectangle up through Hyprland IPC, because no Wayland protocol will tell one client where another
@@ -377,6 +411,17 @@ Synthesis runs on its own thread with a short queue. Beyond `queue_limit` an utt
 rather than queued — a buddy talking over itself is worse than one that missed a line. While it
 speaks, `Drive::speaking` moves the mouth and blocks the expression layer from fighting it.
 
+**A voice belongs to a character, not to the install.** A guy's `voice`, then their character file's,
+then `[voice]`; the value is `"engine:voice"`, an engine, or a voice, so a character wanting
+espeak's flatness is choosing an engine and not only a model. Two of them sharing one voice is the
+fastest way to stop believing in either.
+
+**The floor on speech is shared by the whole cast.** `speech_floor` is a minimum gap between
+anybody speaking aloud, not per guy: the pace was tuned for one creature, and six of them on the
+same quantum is a room that will not shut up. Faces, thoughts and movement are free and are never
+held back by it. A held-back utterance is recorded in `events.jsonl` and never happened as far as
+the rest of the cast is concerned — nobody witnesses an action the floor refused.
+
 ## 10. Threads
 
 ```mermaid
@@ -404,7 +449,8 @@ binary degrades one sense instead of freezing the character.
   `tool_calls`, the intents parsed out, the calls **rejected** and why, token estimate, whether the
   window compacted, the error if any, and the round-trip in milliseconds.
 - **`events.jsonl`** — one object per gate ruling, with its verdict, so what was discarded is as
-  visible as what survived.
+  visible as what survived. Also every inbox line rejected as neither a feeling nor a message, and
+  every utterance the shared speech floor held back.
 
 Everything the model says is recorded before it is acted on, which is what makes misbehaviour
 diagnosable rather than anecdotal.
@@ -423,10 +469,19 @@ One TOML file, `~/.config/lilguys/lilguys.toml`, naming nothing internal. A part
 onto the bundled defaults, so it need only contain what differs.
 
 - `lilguysd --print-config` writes a fully commented starting point.
-- `lilguysd --check` validates it, resolves the provider, probes the model for **native tool-call
-  support**, and reports whether the TTS binary is on `PATH` — all without opening a surface.
+- `lilguy doctor` validates it, resolves the provider, probes the model for **native tool-call
+  support**, checks the compositor offers layer-shell, and checks every character's voice — all
+  without opening a surface. `lilguysd --check` prints the same report; there is one set of checks.
 
-### 12.1 The sutra
+### 12.1 The command
+
+`lilguysd` is the daemon and `lilguy` is what a person — or, in practice, their coding agent — talks
+to. Nobody hand-configures a thing like this, so the CLI is built for a caller that is a program:
+`--json` on everything, an exit code that means something, and every command safe to run twice.
+`doctor` reports one line per check with the fix beside it, so a caller can repair one thing rather
+than start over. See [todo/lilguy-cli.md](todo/lilguy-cli.md).
+
+### 12.2 The sutra
 
 The system prompt is a **sutra** — a thread, in the literal sense of the word. It is the only part
 of a character that persists: the body forgets on every restart, the context window is compacted and
@@ -443,7 +498,7 @@ It is assembled from named strands in the order `[prompt] layers` lists them. Ea
 | `self` | what it is: a body that acts without it, actions learned by reading about them after |
 | `persona` | who it is — the only layer worth rewriting to make a different creature |
 
-### 12.2 Situational facts
+### 12.3 Situational facts
 
 The engine contributes what it knows as `{placeholder}` substitutions into any layer:
 
@@ -468,8 +523,8 @@ One rule, no conditionals, no template language.
 facts; what you are looking at is not. Anything that changes belongs in the event stream, because a
 system prompt that moves is a system prompt that cannot be cached.
 
-`lilguysd --print-prompt` prints each guy's assembled thread verbatim, facts filled in; `--check`
-prints the strand names with their lengths. Stranding exists so that rewriting a character cannot
+`lilguysd --print-prompt` prints each guy's assembled thread verbatim, facts filled in; `lilguy
+doctor` prints the strand names with their lengths. Stranding exists so that rewriting a character cannot
 delete a rule.
 
 Providers are interchangeable because every one speaks the OpenAI chat-completions wire format:
