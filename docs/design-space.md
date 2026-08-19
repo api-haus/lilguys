@@ -135,13 +135,17 @@ onto "which of twelve sprites" without translation.
 
 | adapter | how | effort | role |
 |---|---|---|---|
-| sprite sheet | `tiny-skia`, or a textured quad in wgpu. Reads Shimeji XML if you want the existing corpus. | days | ship first, it proves the plumbing |
+| **graybox** | flat rounded-rect rig, wgpu SDF quads, procedural walk cycle. **Built.** | done | the default skin, not scaffolding — see `CLAUDE.md` |
+| sprite sheet | `tiny-skia`, or a textured quad in wgpu. Reads Shimeji XML if you want the existing corpus. | days | for the Shimeji corpus |
 | Live2D Cubism | Cubism SDK for Native is C++/OpenGL, Linux x86_64 Core supported. FFI or a C++ shim. Proprietary blob; free licence under a revenue threshold. | ~2 weeks | what people actually picture |
 | skinned mesh (glTF / VRM) | wgpu + glTF loader + morph targets and joints. All-Rust, no blob. VRM is glTF plus a blendshape spec — VRoid corpus is free. | ~2 weeks | same endpoint, no licence |
 | rive | `rive-rs`, vector, state machines built in | ~1 week | dark horse; state-machine emotes are exactly this shape |
 
-Plumbing: **Rust + smithay-client-toolkit + wgpu**, both already in the local cargo cache (sctk
-0.19.2, wgpu 29.x). Roughly 10 MB RSS idle. Not web, not Unity, and not Qt either.
+Plumbing: **Rust + smithay-client-toolkit + wgpu** (sctk 0.21, wgpu 30). Not web, not Unity, and
+not Qt either. Measured on the running daemon: **0.5 % of one core, 105 MiB RSS, 0.15 ms a frame**.
+The memory is almost entirely the full-output swapchain — three 2560×1440 BGRA buffers is 42 MiB
+before the Vulkan driver's own allocations. A buddy-sized surface would cut it hard; that trade is
+the open question in §3.
 
 The single biggest lever on cost: **idle submits zero frames.** Not 60 fps of an unchanged
 character — nothing at all, until a sensor or an animation says otherwise. A buddy that only
@@ -227,16 +231,18 @@ the novel part of this, and Wayland supports it better than its reputation impli
 
 ## 8. Build order
 
-Each step de-risks the next.
+Each step de-risks the next. Steps 1 to 3 are done; `docs/qa-graybox.md` checks them.
 
-1. `lilguysd` skeleton — layer-shell overlay, wgpu, a flat quad that follows the cursor at
-   14.6 us per poll and accepts a click. Proves placement, input region, click-through, idle
-   render. ~2 days.
-2. Sensor bus and the three-clock attention loop, sensors printing to stdout. No avatar, no model.
-   Proves the economy — watch it hold 0% CPU for an hour. ~2 days.
-3. Sprite adapter behind the `Avatar` trait. Now it is a desktop pet. ~2 days.
+1. ~~Layer-shell overlay, wgpu, cursor following, click-through, idle render.~~ **Done.**
+2. ~~Graybox rig behind the `Avatar` trait, locomotion state machine, walk cycle.~~ **Done.**
+3. ~~Sensor bus and the three-clock gate: foreign-toplevel, ext-workspace, idle-notify, MPRIS.~~
+   **Done.** Verified end to end: a YouTube `xesam:url` arrives as a push signal and sits in
+   `Pending` for its 60-second dwell without spending anything.
 4. hermes link — channel adapter for clicks, ambient plugin for observations. ~3 days.
-5. Live2D or VRM adapter. ~2 weeks.
+5. Live2D and VRM adapters over the same `Pose`. ~2 weeks each.
+
+Not yet sensed, in the order they are worth adding: clipboard (`ext-data-control`), AT-SPI text,
+and per-window capture. The first two are free; the third is the only one that costs anything.
 
 ## Sources
 

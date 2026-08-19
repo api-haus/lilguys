@@ -1,0 +1,23 @@
+[package]
+name = "lilguysd"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+smithay-client-toolkit = { version = "0.21", features = ["calloop"] }
+wayland-client = { version = "0.31", features = ["system"] }
+wgpu = { version = "30", default-features = false, features = ["wgsl", "vulkan"] }
+raw-window-handle = "0.6"
+pollster = "1"
+bytemuck = { version = "1", features = ["derive"] }
+anyhow = "1"
+fontdue = "0.9.4"
+calloop = "0.14.4"
+calloop-wayland-source = "0.4.1"
+wayland-protocols = { version = "0.32.13", features = ["client"] }
+wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
+zbus = { version = "5.19.0", default-features = false, features = ["async-io", "blocking-api", "p2p"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
