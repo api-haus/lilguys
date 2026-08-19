@@ -32,36 +32,41 @@ already push it.
 local hunger = {}
 
 function hunger.init(ctx)
-  ctx.state.fullness = ctx.state.fullness or 1.0   -- persisted across restarts
-end
+  ctx.state.fullness = ctx.state.fullness or 1.0
 
-function hunger.tick(ctx, dt)
-  ctx.state.fullness = ctx.state.fullness - dt / 21600   -- empty in six hours
-  if ctx.state.fullness < 0.15 then
-    ctx.feel{ state = "starving", detail = "nothing since this morning",
-              tone = "concerned", intensity = 0.9, hold = 40 }
-  end
-end
+  -- Empty over six hours. `every` is a timer, not a frame hook: seconds, not milliseconds.
+  ctx.every("30s", function(dt)
+    ctx.state.fullness = ctx.state.fullness - dt / 21600
+    if ctx.state.fullness < 0.15 then
+      ctx.feel{ state = "starving", detail = "nothing since this morning",
+                tone = "concerned", intensity = 0.9, hold = 40 }
+    end
+  end)
 
--- Scripts observe the same stream the mind does. Nothing privileged.
-function hunger.on_observation(ctx, obs)
-  if obs.kind == "feeling" and obs.source == "pet" and obs.state == "fed" then
-    ctx.state.fullness = 1.0
-    ctx.feel{ state = "fed", tone = "pleased", intensity = 0.9, hold = 25 }
-  end
+  -- Drives observe the same stream everything else does. Nothing privileged.
+  ctx.events
+    :where{ kind = "feeling", source = "pet", state = "fed" }
+    :to(function()
+      ctx.state.fullness = 1.0
+      ctx.feel{ state = "fed", tone = "pleased", intensity = 0.9, hold = 25 }
+    end)
 end
 
 return hunger
 ```
 
+The same stream operators as [world-scripting.md](world-scripting.md), because there is one API. A
+drive is a world script scoped to one character — the difference is what it can reach, not what it
+can say.
+
 | script calls | goes to |
 |---|---|
 | `ctx.feel{…}` | an interoceptive `Feeling`, same as the inbox |
+| `ctx.events` | this character's stream, with the full operator set |
+| `ctx.every(interval, fn)` | a timer in seconds, never a frame hook |
 | `ctx.state` | a table persisted to disk per script |
 | `ctx.config` | that script's own `[scripts.<name>]` table |
 | `ctx.log(msg)` | `events.jsonl` |
-| `on_observation(ctx, obs)` | every observation, after the gate |
-| `tick(ctx, dt)` | a slow timer, seconds not frames |
 
 **A script may not** open sockets, read files, spawn processes, touch the surface, call the model,
 or emit an intent. Those are the daemon's, and a script that needs one of them is asking for a
@@ -109,7 +114,9 @@ Do this after the soul/hologram split, so scripts land on the side that can be r
 1. `mlua` with `luau` and `vendored`; one `ScriptHost` owning the VM and the script table.
 2. `ctx` implementation: `feel`, `state`, `config`, `log`. Nothing else in the first cut.
 3. Persistence: one JSON file per script beside the logs, written on change with a debounce.
-4. `tick` on a slow timer, `on_observation` after the gate.
+4. `ctx.every` on a slow timer; `ctx.events` as an observable, with `where`, `map`, `filter`,
+   `debounce`, `throttle` and `to`. The operator set is shared with world scripts — one API, two
+   scopes.
 5. Interrupt, memory ceiling, and `feel` rate limit — all three before any script ships.
 6. Character directories and the `[character]` config key.
 7. Ship `hunger.lua` as the worked example, and cite it in the docs rather than describing it.

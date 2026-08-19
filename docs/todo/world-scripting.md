@@ -139,6 +139,126 @@ Three things fall out of this, and each is worth having on its own:
 - **`on_call` runs on the model's clock.** It must be interrupted and bounded like every other
   script entry point, and a verb that blocks is a verb that hangs a turn.
 
+## Event semantics
+
+How functional can this be in Luau? More than it looks, with one real gap.
+
+**What carries over cleanly:** first-class functions and closures, varargs and multiple returns,
+metatables for operator overloading, and tables as the only structure you need. Luau adds checked
+type annotations, `continue`, and string interpolation.
+
+**What does not:** there is no way to define a new operator, so no `|>`. There is no destructuring
+and no pattern matching. Nothing is immutable by default.
+
+**What is better than the JavaScript shape that inspired this:** coroutines. An LLM call can look
+synchronous and still yield, so a director reads as a straight line instead of a callback tree, and
+no `async` colouring spreads through the codebase.
+
+```lua
+-- Reads top to bottom. Underneath, `ask` yields and the engine resumes the coroutine on reply.
+local arc = llm.ask("might", "Invent a small disaster for a fry cook. One sentence.")
+world.broadcast{ state = "something is off today", detail = arc }
+```
+
+### The shape
+
+Method chaining, not operators. `..` could be metatabled into a pipe and it would be cute and
+unreadable; `:map():filter():to()` is what a Lua reader already knows.
+
+```lua
+-- Sources: every stream is an observable of events.
+world.events                       -- everything, from every character and every sensor
+world.sensors                      -- desktop only
+cast.spongebob.events              -- what SpongeBob perceives
+cast.spongebob.actions             -- what SpongeBob did
+
+-- Operators: each returns a new stream, none mutate the source.
+:filter(fn)          :map(fn)              :tap(fn)
+:where{ kind = "focus" }                   -- sugar for the common filter
+:dedupe(keyfn, secs) :debounce(secs)       :throttle(secs)
+:buffer(secs)        :batch(n)             :take(n)
+:merge(other)        :partition(fn)        -- returns two streams
+
+-- Sinks.
+:to(cast.patrick)          -- becomes an event in Patrick's stream
+:to(world.broadcast)       -- becomes an event for everyone
+:to(function(e) ... end)   -- do something else entirely
+```
+
+### Handlers, for when a pipeline is overkill
+
+```lua
+world.on("workspace", function(e)
+  ctx.state.room = e.name
+end)
+
+cast.squidward:on("said something", function(e)
+  if e.detail:find("Krabby") then
+    world.tell("squidward", { state = "wince", tone = "concerned", intensity = 0.7 })
+  end
+end)
+```
+
+`on` is `world.events:where{...}:to(fn)` with a nicer face. Both exist because both read better in
+different places, and neither is more powerful than the other.
+
+### Rerouting and remapping
+
+The useful part. A director earns its place by changing what reaches whom:
+
+```lua
+-- Patrick hears everything, but louder and dumber.
+cast.spongebob.actions
+  :where{ kind = "said something" }
+  :map(function(e)
+    return { state = "hears SpongeBob", detail = e.detail:upper() .. "!!!", intensity = 0.6 }
+  end)
+  :to(cast.patrick)
+
+-- Nobody in the Chum Bucket hears anything from the Krusty Krab.
+world.events
+  :filter(function(e) return ctx.state.where[e.source] ~= "chum bucket" end)
+  :to(cast.plankton)
+
+-- One noisy sensor, damped for everyone.
+world.sensors
+  :where{ kind = "retitle" }
+  :debounce(30)
+  :to(world.broadcast)
+```
+
+### Streaming from a model
+
+`llm.stream` is a sink that is also a source: feed it events, it emits what the model made of them.
+
+```lua
+local composer = llm.stream("might", {
+  every = "10m",
+  system = "You write one line of narration for a cartoon. Never dialogue.",
+  prompt = function(batch)
+    return "Recent goings-on:\n" .. table.concat(map(batch, describe), "\n")
+  end,
+})
+
+world.events:buffer("10m"):to(composer)
+composer:to(world.broadcast)
+```
+
+If the `might` tier is unconfigured or spent, `composer` emits nothing and the pipeline is simply
+quiet. That is the degradation story from [model-tiers.md](model-tiers.md), expressed as a stream
+that stops producing rather than a call that fails.
+
+### Rules the engine enforces
+
+- **An operator that throws drops that event and logs it.** It never kills the stream. One bad
+  `map` must not deafen a character.
+- **Cycles are cut at depth.** `A.actions -> B -> A.actions` is legal and useful; unbounded
+  amplification is not. Each event carries a hop count and is dropped past a ceiling.
+- **A stream is push-based and synchronous** except where a coroutine yields. Anything that yields
+  buffers, bounded, dropping oldest — same rule as everywhere else.
+- **`to(character)` produces an ordinary observation.** Nothing arrives at a character by a private
+  route, which is philosophy's single-stream law holding all the way up here.
+
 ## What a plugin carries
 
 ```
@@ -159,6 +279,54 @@ bikini-bottom/
 One install, seven personalities, three world scripts. The person configures which tiers exist and
 what they can afford; the plugin adapts. On a machine with only a local 4B, `might` resolves down
 to `mind` and the episode generator runs a dumber arc — it does not fail to run.
+
+### `world/episode.lua`, in full
+
+```lua
+local episode = {}
+
+function episode.init(ctx)
+  ctx.state.beats = ctx.state.beats or {}
+  ctx.state.where = ctx.state.where or {}
+
+  -- Buy one expensive thought an hour, and spend the hour spending it.
+  ctx.every("1h", function()
+    local arc = llm.ask("might", {
+      system = "You plan a small cartoon episode. Reply with three short beats, one per line.",
+      prompt = "The cast: " .. table.concat(ctx.cast_names(), ", ")
+            .. ".\nYesterday: " .. (ctx.state.last or "nothing much"),
+    })
+    if not arc then return end            -- tier spent, or never configured
+    ctx.state.beats = split_lines(arc)
+    ctx.state.last = arc
+  end)
+
+  -- Drip one beat every twenty minutes. Nobody is told what to say about it.
+  ctx.every("20m", function()
+    local beat = table.remove(ctx.state.beats, 1)
+    if beat then
+      world.broadcast{ state = "something happens", detail = beat, intensity = 0.5 }
+    end
+  end)
+end
+
+-- A character reacting to a beat is itself a beat. Cheap, no model, pure routing.
+function episode.wire(ctx)
+  cast.spongebob.actions
+    :where{ kind = "said something" }
+    :throttle(45)
+    :map(function(e) return { state = "hears SpongeBob", detail = e.detail, intensity = 0.5 } end)
+    :to(cast.patrick)
+
+  world.events
+    :where{ kind = "feeling", state = "made a patty" }
+    :to(function()
+      world.broadcast{ state = "smells a Krabby Patty", intensity = 0.6 }
+    end)
+end
+
+return episode
+```
 
 ## Why this is the right shape
 

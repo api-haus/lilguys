@@ -37,7 +37,7 @@ flowchart TD
 | [agent-integration](agent-integration.md) | be the face of hermes or openclaw; the original reason for all this | after the split and the message path |
 | [object-persistence](object-persistence.md) | whether persistent things need representing at all | open question; may be answered by doing nothing |
 | [model-tiers](model-tiers.md) | name what a call is worth, not what answers it; engine-enforced budgets | soon — it settles the vocabulary plugins are written against |
-| [world-scripting](world-scripting.md) | a thin core; situations, arcs and casts authored in Luau | after tiers and the Luau host |
+| [world-scripting](world-scripting.md) | a thin core; situations, arcs and casts authored in Luau, over one reactive stream API | after tiers and the Luau host |
 | [many-guys](many-guys.md) | a cast rather than a mascot; the roster works, the social layer is thin | now — voices and addressing are the gaps |
 | [three-process-split](three-process-split.md) | pull the mind out of the soul | trigger-gated; not soon |
 
