@@ -29,16 +29,20 @@ ordinary observations.
 3. **Never let system text reach a person.** `speak` and `think` are vetted in
    `mind/capability.rs::vet_leakage`. Adding a path from prompt or schema text to the voice or a
    bubble is a defect, not a feature.
-4. **Config names nothing internal.** `lilguys.default.toml` is the whole surface and describes
+4. **Situational facts are constant, or they do not belong in the prompt.** The engine fills
+   `{name}`, `{others}`, `{capabilities}` and friends into the sutras; a line whose placeholder is
+   empty is dropped whole. Anything that *changes* goes in the event stream — a moving system prompt
+   cannot be cached.
+5. **Config names nothing internal.** `lilguys.default.toml` is the whole surface and describes
    behaviour, not types. Every field must be present with its default — `Config::default()` parses
    that file, so a missing field is a startup failure.
-5. **There is never only one guy.** The roster is a `Vec`; nothing may assume a single character.
-6. **Every reflex records itself**, and a reflex record never triggers another reflex.
-7. **Whatever authors the world may not author a character.** Events in and verbs offered; never
+6. **There is never only one guy.** The roster is a `Vec`; nothing may assume a single character.
+7. **Every reflex records itself**, and a reflex record never triggers another reflex.
+8. **Whatever authors the world may not author a character.** Events in and verbs offered; never
    intents.
-8. **Grayboxing aids off by default** (`[debug]`). The graybox skin is the shipping look, not
+9. **Grayboxing aids off by default** (`[debug]`). The graybox skin is the shipping look, not
    scaffolding.
-9. **Secrets are named, never stored.** Providers reference an environment variable.
+10. **Secrets are named, never stored.** Providers reference an environment variable.
 
 ## Commands
 

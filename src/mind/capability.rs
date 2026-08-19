@@ -212,6 +212,11 @@ pub fn parse(name: &str, arguments: &str) -> Result<Intent, String> {
     }
 }
 
+/// Every verb a body has, for the sutras to name without hardcoding a second list.
+pub fn names() -> Vec<&'static str> {
+    vec!["react", "gesture", "think", "speak", "focus"]
+}
+
 /// The tool schemas sent on every turn.
 pub fn schemas() -> Value {
     json!([

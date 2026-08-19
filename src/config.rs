@@ -195,17 +195,43 @@ pub struct Layer {
     pub file: Option<PathBuf>,
 }
 
+/// Situational facts the engine contributes to the sutras, as `{placeholder}` substitutions.
+///
+/// Every one must be **constant for the life of the process**. The system prompt has to stay
+/// byte-stable or per-conversation caching is lost on every turn, so anything that changes belongs
+/// in the event stream instead. Who you are is a fact; what you are looking at is not.
+#[derive(Debug, Clone, Default)]
+pub struct Facts(BTreeMap<String, String>);
+
+impl Facts {
+    pub fn set(&mut self, key: &str, value: impl Into<String>) -> &mut Self {
+        self.0.insert(key.into(), value.into());
+        self
+    }
+
+    pub fn get(&self, key: &str) -> &str {
+        self.0.get(key).map(String::as_str).unwrap_or_default()
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = &String> {
+        self.0.keys()
+    }
+}
+
 impl Prompt {
-    /// Joins the layers. `{name}` in any layer becomes the buddy's name.
-    pub fn assemble(&self, name: &str, config_dir: Option<&Path>) -> String {
+    /// Joins the layers and fills in the engine's facts.
+    ///
+    /// One rule handles the awkward case: **a line whose placeholder resolves to nothing is
+    /// dropped whole.** So `Also here: {others}.` simply vanishes when a character is alone,
+    /// instead of leaving a sentence with a hole in it, and no layer needs conditionals.
+    pub fn assemble(&self, facts: &Facts, config_dir: Option<&Path>) -> String {
         self.layers
             .iter()
             .filter_map(|key| Some((key, self.texts.get(key)?)))
-            .map(|(key, layer)| read_layer(key, layer, config_dir))
+            .map(|(key, layer)| fill(&read_layer(key, layer, config_dir), facts).trim().to_string())
             .filter(|t| !t.trim().is_empty())
             .collect::<Vec<_>>()
             .join("\n\n")
-            .replace("{name}", name)
     }
 
     /// Layer names with the length of each, for `--check`.
@@ -218,6 +244,32 @@ impl Prompt {
             })
             .collect()
     }
+}
+
+fn fill(text: &str, facts: &Facts) -> String {
+    let kept: Vec<String> = text
+        .lines()
+        .filter_map(|line| {
+            let mut out = line.to_string();
+            let mut emptied = false;
+            for key in facts.keys() {
+                let token = format!("{{{key}}}");
+                if out.contains(&token) {
+                    let value = facts.get(key);
+                    emptied |= value.is_empty();
+                    out = out.replace(&token, value);
+                }
+            }
+            (!emptied).then_some(out)
+        })
+        .collect();
+
+    // A dropped line leaves its paragraph break behind; close the gap it opened.
+    let mut out = kept.join("\n");
+    while out.contains("\n\n\n") {
+        out = out.replace("\n\n\n", "\n\n");
+    }
+    out
 }
 
 fn read_layer(key: &str, layer: &Layer, config_dir: Option<&Path>) -> String {

@@ -59,7 +59,7 @@ fn main() -> Result<()> {
                 let others: Vec<String> =
                     names.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, n)| n.clone()).collect();
                 println!("═══ {} ═══\n", names[i]);
-                println!("{}\n", guy::Guy::system_prompt(&cfg, character, &names[i], &others));
+                println!("{}\n", guy::Guy::system_prompt(&cfg, character, &names[i], &others, dir));
             }
             return Ok(());
         }
@@ -77,7 +77,6 @@ fn main() -> Result<()> {
         None => eprintln!("log: disabled"),
     }
     let config_dir = from.as_deref().and_then(|p| p.parent()).map(|p| p.to_path_buf());
-    let system = cfg.prompt.assemble(&cfg.buddy.name, config_dir.as_deref());
 
     let conn = Connection::connect_to_env().context("no wayland display")?;
     let (globals, event_queue) = registry_queue_init(&conn)?;
@@ -114,7 +113,7 @@ fn main() -> Result<()> {
     for (i, (entry, character)) in roster.iter().enumerate() {
         let others: Vec<String> =
             all_names.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, n)| n.clone()).collect();
-        let system = guy::Guy::system_prompt(&cfg, character, &character.name, &others);
+        let system = guy::Guy::system_prompt(&cfg, character, &character.name, &others, config_dir.as_deref());
 
         // One channel per guy, each closing over its own index, so a message always knows whose
         // it is without a wrapper type.

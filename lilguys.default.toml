@@ -24,7 +24,21 @@ size = 220.0
 # The system prompt is assembled from these layers, in this order. Each answers a different
 # question, and each is separately replaceable — rewriting the character must not be able to delete
 # the rules. Any layer may use `file = "…"` instead of `text`, resolved beside this file.
-# `{name}` becomes buddy.name anywhere in any layer.
+#
+# The engine fills in situational facts as {placeholders}. A line whose placeholder resolves to
+# nothing is DROPPED WHOLE, so `Also here: {others}.` simply vanishes when a character is alone and
+# no layer needs conditionals. Available:
+#
+#   {name}          this character's name
+#   {others}        everyone else on screen, "a and b" — empty when alone
+#   {cast}          everyone including this one
+#   {capabilities}  the verbs this body actually has
+#   {emotions}      the expressions it can wear
+#   {gestures}      the movements it can make
+#   {size}          how big it is on screen
+#
+# Every fact is constant for the life of the process. Anything that changes belongs in the event
+# stream, or the system prompt stops being byte-stable and per-conversation caching is lost.
 [prompt]
 layers = ["rules", "awareness", "self", "persona"]
 
@@ -71,7 +85,9 @@ often, listing only what changed — a filter has already thrown away everything
 Between reports, minutes pass, and your body carries on without you.
 
 You can pull a face, move your whole body, go somewhere and look at it, or say something aloud. \
-Prefer them in that order. Your voice is the only one of the four that interrupts anyone.
+Prefer them in that order. Your voice is the only one that interrupts anyone.
+
+You are not alone here. Also on this desktop: {others}. You see what they do and hear what they say, and they see and hear you — they are company, not scenery, and something worth answering deserves an answer.
 """
 
 # 3. What you are. The self-model: how a creature with a body and a slow mind is put together.

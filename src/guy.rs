@@ -63,28 +63,35 @@ impl Guy {
         }
     }
 
-    /// The system prompt for this one: the shared layers, its own persona replacing the last, and
-    /// a line naming whoever else is on screen. Without that, a report saying another creature did
-    /// something arrives with no idea who that is.
+    /// The system prompt for this one: the shared sutras with its own persona in the last layer,
+    /// and the engine's situational facts filled in.
     pub fn system_prompt(
         cfg: &Config, character: &Character, name: &str, others: &[String],
+        config_dir: Option<&std::path::Path>,
     ) -> String {
         let mut prompt = cfg.prompt.clone();
         if let Some(layer) = prompt.texts.get_mut("persona") {
             layer.text = character.persona.clone();
             layer.file = None;
         }
-        if !others.is_empty() {
-            if let Some(layer) = prompt.texts.get_mut("awareness") {
-                layer.text.push_str(&format!(
-                    "\n\nYou are not alone here. Also on this desktop: {}. You see what they do and \
-                     hear what they say, and they see and hear you. They are company, not scenery — \
-                     if one of them says something worth answering, answer it.",
-                    others.join(", ")
-                ));
-            }
-        }
-        prompt.assemble(name, None)
+        prompt.assemble(&Self::facts(cfg, character, name, others), config_dir)
+    }
+
+    /// What the engine knows that does not change: who you are, who else is here, what you can do.
+    /// Anything that changes goes in the stream, or the system prompt stops being byte-stable.
+    pub fn facts(
+        cfg: &Config, character: &Character, name: &str, others: &[String],
+    ) -> crate::config::Facts {
+        let mut facts = crate::config::Facts::default();
+        facts
+            .set("name", name)
+            .set("others", join_names(others))
+            .set("cast", join_names(&[&[name.to_string()][..], others].concat()))
+            .set("capabilities", crate::mind::capability::names().join(", "))
+            .set("emotions", crate::avatar::Emotion::NAMES.join(", "))
+            .set("gestures", crate::avatar::Gesture::NAMES.join(", "))
+            .set("size", format!("{:.0} pixels tall", character.size.unwrap_or(cfg.buddy.size)));
+        facts
     }
 
     pub fn busy(&self) -> bool {
@@ -159,5 +166,14 @@ impl Guy {
 
     pub fn expression_of(&self, emotion: Emotion) -> &'static str {
         emotion.name()
+    }
+}
+
+/// "a", "a and b", "a, b and c" — a list a character can read aloud.
+fn join_names(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
     }
 }

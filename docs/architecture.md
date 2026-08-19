@@ -438,8 +438,34 @@ The system prompt is assembled from named layers in the order `[prompt] layers` 
 | `self` | what it is: a body that acts without it, actions learned by reading about them after |
 | `persona` | who it is — the only layer worth rewriting to make a different creature |
 
-`lilguysd --print-prompt` prints the assembled result verbatim; `--check` prints the layer names
-with their lengths. Layering exists so that rewriting a character cannot delete a rule.
+### 12.2 Situational facts
+
+The engine contributes what it knows as `{placeholder}` substitutions into any layer:
+
+| fact | is |
+|---|---|
+| `{name}` | this character's name |
+| `{others}` · `{cast}` | who else is on screen, and everyone including this one |
+| `{capabilities}` | the verbs this body actually has |
+| `{emotions}` · `{gestures}` | the expressions and movements it can make |
+| `{size}` | how big it is on screen |
+
+**A line whose placeholder resolves to nothing is dropped whole.** So a layer may write
+
+```
+You are not alone here. Also on this desktop: {others}.
+```
+
+and that sentence simply vanishes when a character is alone, instead of leaving a hole in itself.
+One rule, no conditionals, no template language.
+
+**Every fact must be constant for the life of the process.** Who you are and who is with you are
+facts; what you are looking at is not. Anything that changes belongs in the event stream, because a
+system prompt that moves is a system prompt that cannot be cached.
+
+`lilguysd --print-prompt` prints each guy's assembled prompt verbatim, facts filled in; `--check`
+prints the layer names with their lengths. Layering exists so that rewriting a character cannot
+delete a rule.
 
 Providers are interchangeable because every one speaks the OpenAI chat-completions wire format:
 llama.cpp's server, ollama, vLLM, LM Studio, OpenRouter, OpenAI. Switching between local and hosted
