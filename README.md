@@ -20,6 +20,7 @@ The model must support **native tool calls**; lilguys does not parse calls out o
   quantised event flow means, the attention gate, the reactor, the four capabilities.
 - [Design space](docs/design-space.md) — what Wayland actually exposes, measured; rendering
   adapters; the attention economy; how this attaches to hermes.
+- [Planned work](docs/todo/) — the soul/hologram process split, sandboxed Luau drives.
 - [QA](docs/qa-graybox.md) — five manual checks, about three minutes.
 
 Logs land in `~/.local/state/lilguys/`: `turns.jsonl` is every model turn verbatim — slice sent,

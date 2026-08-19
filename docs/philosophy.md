@@ -50,6 +50,23 @@ whether the person is still there. It arrives from Wayland and D-Bus. It is abou
 sight, and whatever else a subsystem chooses to report — hunger, boredom, the ache of a long
 uptime. It is about it.
 
+**A reflex is not exempt from being sensed.** Every reflexive action the body takes produces its
+own interoceptive record: he pulls a face without asking anyone, and *that he pulled a face* enters
+the stream as a line of its own. He does not find out he reacted by inference; he reads it, the way
+he reads everything else about himself.
+
+```
+- you feel starving (hunger) — nothing since this morning
+- you found yourself looking concerned at starving
+```
+
+This is the whole of the self-awareness programme, and it is one line per reflex. Without it the
+body is a puppet with hidden strings — things happen through him that he never learns about. With
+it, the record of his life is complete: what happened, and what he did about it before he knew.
+
+The one exemption is recursive: a record of a reflex must never provoke a reflex. It reaches the
+mind like anything else and moves nothing. Awareness of a flinch is not itself a flinch.
+
 **Both go into the same stream.** This is the load-bearing decision. The mind does not have a
 special channel for feelings and a general one for observations; it reads one account in which
 `focus zen — a video essay` and `you feel starving (hunger)` sit as neighbours. It learns how it
@@ -106,13 +123,33 @@ These follow from the split. A change that breaks one of them is wrong even if i
 3. **Intentions are requests, not commands.** `focus` names a place and the body finds its own way
    there. The mind must never receive coordinates and must never send them.
 4. **A free response is never budgeted.** See above.
-5. **Interoception uses the same channel as exteroception.** No side door, no privileged access,
+5. **Every reflex records itself.** A body action taken without the mind must produce an
+   interoceptive line saying it happened. Adding a reflex without its record makes him unaware of
+   his own behaviour, which is the one thing this design exists to prevent. Records are marked
+   reflective and never trigger further reflexes.
+6. **Interoception uses the same channel as exteroception.** No side door, no privileged access,
    no injecting state into the prompt outside the stream. The one exception is the framing line,
    which carries *current* state rather than *changed* state — because a feeling that never changes
    is still true, and an event stream alone cannot say so.
-6. **Silence is the default everywhere.** Calling no tool is correct. Sending no slice is correct.
+7. **Silence is the default everywhere.** Calling no tool is correct. Sending no slice is correct.
    Discarding an observation is correct. The gate exists to make silence cheap, and every addition
    must make silence more likely, not less.
+
+## The prompt is layered for the same reason
+
+The system prompt is not one document. It is four, sent in order, each answering a different
+question:
+
+1. **rules** — what may never be done. Absolute, and shortest.
+2. **awareness** — where he is and what is going on. Situational fact, not instruction.
+3. **self** — what kind of thing he is: that his body acts without him, that he learns his own
+   actions by reading about them afterwards.
+4. **persona** — who he is. The only layer worth rewriting to make a different creature.
+
+The layering is the same principle as the mind/body split: separable concerns must be separately
+replaceable. Someone writing a new personality must not be able to delete, by accident, the rule
+that keeps system text out of his mouth. A layer is a file or a block of text; the order is a list
+in the config.
 
 ## Why the pace is the point
 

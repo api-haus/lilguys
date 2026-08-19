@@ -173,8 +173,13 @@ fn main() -> Result<()> {
 /// command away from a diagnosis.
 fn check() -> Result<()> {
     let (cfg, from) = Config::load()?;
+    let from2 = from.clone();
     println!("config     {}", from.map(|p| p.display().to_string()).unwrap_or("(defaults)".into()));
     println!("buddy      {} · skin {} · {:.0}px", cfg.buddy.name, cfg.buddy.skin, cfg.buddy.size);
+    let dir = from2.as_deref().and_then(|p| p.parent());
+    let layers: Vec<String> =
+        cfg.prompt.outline(dir).iter().map(|(k, n)| format!("{k} {n}")).collect();
+    println!("prompt     {}", layers.join(" · "));
 
     let provider = cfg.provider()?;
     println!("provider   {} · {} · {}", cfg.mind.provider, provider.url, provider.model);

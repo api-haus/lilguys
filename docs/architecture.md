@@ -185,6 +185,17 @@ The answer is a fixed mapping from observation to expression, applied directly t
 the worst this layer can do with the model unreachable is pull a face. It never moves him, never
 speaks, and never spends anything.
 
+**Every reflex records itself.** Applying an expression also pushes an interoceptive line back onto
+the bus, so the next slice carries both the cause and what he did about it before he knew:
+
+```
+- you feel starving (hunger) — nothing since this morning
+- you found yourself looking concerned at starving
+```
+
+Those records are marked reflective and are exempt from the reflex arc — otherwise reacting to a
+reaction would never terminate. See [philosophy.md](philosophy.md).
+
 Dwell is what stops the buddy reacting to things you passed through. A window must hold focus for
 `focus_dwell`; a track must play for `media_dwell`. Skipping a video means its transcript is never
 worth fetching, and the gate is where that is decided.
@@ -412,6 +423,21 @@ onto the bundled defaults, so it need only contain what differs.
 - `lilguysd --print-config` writes a fully commented starting point.
 - `lilguysd --check` validates it, resolves the provider, probes the model for **native tool-call
   support**, and reports whether the TTS binary is on `PATH` — all without opening a surface.
+
+### 12.1 Prompt layers
+
+The system prompt is assembled from named layers in the order `[prompt] layers` lists them. Each is
+`text = """…"""` or `file = "…"`, and `{name}` becomes the buddy's name anywhere in any of them.
+
+| layer | answers |
+|---|---|
+| `rules` | what may never be done — no system text in its mouth, no repeating the report back |
+| `awareness` | where it is: a desktop, a person working, no question asked, no task |
+| `self` | what it is: a body that acts without it, actions learned by reading about them after |
+| `persona` | who it is — the only layer worth rewriting to make a different creature |
+
+`lilguysd --print-prompt` prints the assembled result verbatim; `--check` prints the layer names
+with their lengths. Layering exists so that rewriting a character cannot delete a rule.
 
 Providers are interchangeable because every one speaks the OpenAI chat-completions wire format:
 llama.cpp's server, ollama, vLLM, LM Studio, OpenRouter, OpenAI. Switching between local and hosted

@@ -148,10 +148,21 @@ impl Body {
         self.enter(if leaving { Drift::Leaving } else { Drift::Seeking });
     }
 
+    /// Deliberate. The mind asked for this, so it needs no telling that it happened.
     pub fn feel(&mut self, emotion: Emotion, intensity: f32, hold: f32) {
         self.emotion = emotion;
         self.emotion_weight = intensity.clamp(0.0, 1.0);
         self.emotion_hold = hold.max(0.5);
+    }
+
+    /// Reflexive. It happened without asking, so the record says so — self-awareness is not free,
+    /// it is this line. The record is marked reflective and cannot provoke another reflex.
+    pub fn reflex(&mut self, emotion: Emotion, intensity: f32, hold: f32, because: &str) {
+        self.feel(emotion, intensity, hold);
+        self.felt.push(Feeling::reflex_record(
+            &format!("looking {}", emotion.name()),
+            because,
+        ));
     }
 
     pub fn perform(&mut self, gesture: Gesture) {
@@ -294,6 +305,7 @@ impl Body {
             return;
         }
         self.wander_roll = 0.0;
+        self.felt.push(Feeling::reflex_record("restless", "nothing in particular"));
         // Deterministic scatter from the clocks already running; no RNG dependency for a wander.
         let a = (self.sway * 12.9898 + self.breath * 78.233).sin() * 43758.547;
         let b = (self.bob * 39.3468 + self.sway * 11.135).sin() * 24634.633;

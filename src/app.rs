@@ -202,9 +202,13 @@ impl App {
         if !sensed.is_empty() || self.attention.waiting() > 0 {
             for (verdict, what) in self.attention.consider(sensed, now) {
                 // Model turns are minutes apart and capped, so the gate answers locally in the gap.
-                if verdict == Verdict::Emote {
+                // A record of a reflex is exempt: it reaches the mind, but reacting to it would
+                // only produce another record of reacting to it.
+                let already_reflexive =
+                    matches!(&what, Observation::Feeling(f) if f.reflective);
+                if verdict == Verdict::Emote && !already_reflexive {
                     let (emotion, intensity, hold) = reflex(&what);
-                    self.body.feel(emotion, intensity, hold);
+                    self.body.reflex(emotion, intensity, hold, &what.summary());
                 }
                 self.quantiser.observe(what.summary());
             }

@@ -81,44 +81,66 @@ pub struct Buddy {
     pub size: f32,
 }
 
-/// The whole system prompt, in the order it is assembled: operating contract, then character.
+/// The system prompt, assembled from named layers in the order `layers` lists them.
 ///
-/// Splitting them is not cosmetic. The preamble is the contract every lilguy is held to whatever
-/// it is like; the persona is what this one is like. Rewriting the character should not be able to
-/// delete the rule that keeps system text out of its mouth.
+/// Layering is not decoration. Each layer answers a different question — what may not be done,
+/// what this program is, who this creature is — and each is separately replaceable. Rewriting the
+/// character must not be able to delete the rule that keeps system text out of its mouth.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Prompt {
+    /// Layer names, in the order they are sent. A name with no matching table is skipped.
+    pub layers: Vec<String>,
+    #[serde(flatten)]
+    pub texts: BTreeMap<String, Layer>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Prompt {
-    /// How to behave, regardless of character. Sent first.
-    pub preamble: String,
-    /// Overrides `preamble`. Relative paths resolve beside the config file.
+pub struct Layer {
     #[serde(default)]
-    pub preamble_file: Option<PathBuf>,
-    /// What this one is like. Sent after the preamble.
-    pub persona: String,
+    pub text: String,
+    /// Overrides `text`. Relative paths resolve beside the config file.
     #[serde(default)]
-    pub persona_file: Option<PathBuf>,
+    pub file: Option<PathBuf>,
 }
 
 impl Prompt {
-    /// Assembles the system prompt. `{name}` in either part becomes the buddy's name.
+    /// Joins the layers. `{name}` in any layer becomes the buddy's name.
     pub fn assemble(&self, name: &str, config_dir: Option<&Path>) -> String {
-        let preamble = read_or(&self.preamble, self.preamble_file.as_deref(), config_dir);
-        let persona = read_or(&self.persona, self.persona_file.as_deref(), config_dir);
-        format!("{}\n\n{}", preamble.trim(), persona.trim()).replace("{name}", name)
+        self.layers
+            .iter()
+            .filter_map(|key| Some((key, self.texts.get(key)?)))
+            .map(|(key, layer)| read_layer(key, layer, config_dir))
+            .filter(|t| !t.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+            .replace("{name}", name)
+    }
+
+    /// Layer names with the length of each, for `--check`.
+    pub fn outline(&self, config_dir: Option<&Path>) -> Vec<(String, usize)> {
+        self.layers
+            .iter()
+            .map(|key| match self.texts.get(key) {
+                Some(l) => (key.clone(), read_layer(key, l, config_dir).trim().len()),
+                None => (format!("{key} (missing)"), 0),
+            })
+            .collect()
     }
 }
 
-fn read_or(inline: &str, file: Option<&Path>, config_dir: Option<&Path>) -> String {
-    let Some(file) = file else { return inline.to_string() };
+fn read_layer(key: &str, layer: &Layer, config_dir: Option<&Path>) -> String {
+    let Some(file) = layer.file.as_ref() else { return layer.text.trim().to_string() };
     let path = match (file.is_relative(), config_dir) {
         (true, Some(dir)) => dir.join(file),
-        _ => file.to_path_buf(),
+        _ => file.clone(),
     };
-    std::fs::read_to_string(&path).unwrap_or_else(|e| {
-        eprintln!("{}: {e}", path.display());
-        inline.to_string()
-    })
+    std::fs::read_to_string(&path)
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|e| {
+            eprintln!("prompt layer {key}: {} — {e}", path.display());
+            layer.text.trim().to_string()
+        })
 }
 
 #[derive(Debug, Clone, Deserialize)]

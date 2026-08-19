@@ -60,6 +60,13 @@ process group otherwise.
 | `src/voice.rs` | TTS as a command template |
 | `src/config.rs` | the whole configurable surface |
 
+## Planned, not built
+
+- [docs/todo/soul-hologram-split.md](docs/todo/soul-hologram-split.md) — two processes, so the mind
+  can restart without the character blinking out. Do this first; the scripting work lands on top.
+- [docs/todo/luau-scripting.md](docs/todo/luau-scripting.md) — sandboxed Luau drives and character
+  packages, composing through the observation stream rather than through each other.
+
 ## Adding things
 
 - **A sense** pushes `Observation` onto the bus and adds a `[senses]` switch. It must be push-based

@@ -43,6 +43,10 @@ pub struct Feeling {
     /// Seconds to hold the expression.
     #[serde(default = "a_while")]
     pub hold: f32,
+    /// This feeling *is* the record of a reflex that already fired. It reaches the mind like any
+    /// other, but it must never provoke a second reflex — that way lies an echo.
+    #[serde(default, skip_deserializing)]
+    pub reflective: bool,
 }
 
 fn middling() -> f32 {
@@ -63,6 +67,20 @@ impl Feeling {
             tone: Some(tone.into()),
             intensity,
             hold,
+            reflective: false,
+        }
+    }
+
+    /// The body noticing what it just did without being asked.
+    pub fn reflex_record(did: &str, because: &str) -> Self {
+        Self {
+            source: "reflex".into(),
+            state: did.into(),
+            detail: because.into(),
+            tone: None,
+            intensity: 0.0,
+            hold: 0.0,
+            reflective: true,
         }
     }
 }
@@ -90,6 +108,14 @@ impl Observation {
             }
             Observation::Media { title, artist, playing, .. } => {
                 format!("{} {} — {}", if *playing { "playing" } else { "paused" }, clip(artist, 16), clip(title, 26))
+            }
+            Observation::Feeling(f) if f.reflective => {
+                // The cause is the line immediately above this one, so name it, do not restate it.
+                let at = f.detail.trim_start_matches("you feel ").trim_start_matches("you found ");
+                match at.split(['—', '(']).next().map(str::trim).filter(|s| !s.is_empty()) {
+                    Some(at) => format!("you found yourself {} at {}", f.state, clip(at, 34)),
+                    None => format!("you found yourself {}", f.state),
+                }
             }
             Observation::Feeling(f) if f.detail.is_empty() => {
                 format!("you feel {} ({})", f.state, f.source)
