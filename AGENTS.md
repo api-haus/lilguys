@@ -52,6 +52,7 @@ ordinary observations.
 ```bash
 cargo build --release
 cargo test --release
+./target/release/lilguy setup             # doctor, plus permission to fix what it finds
 ./target/release/lilguy doctor            # every check: config, wayland, NATIVE TOOL CALLS, voice
 ./target/release/lilguy start | stop      # the unit if installed, a detached process if not
 ./target/release/lilguy say "…"           # a message reaches them at once, not at the next quantum
@@ -118,6 +119,11 @@ Each cost real time. None are visible from the code.
 - **Novelty is per key, so a source minting a fresh key each time sails straight through it.** Hence
   `per_source_cap`.
 - **A semicolon inside a mermaid `Note` terminates the statement.** Scan diagrams before committing.
+- **The tool-call probe is flaky by nature.** A reasoning model sometimes thinks its way past the
+  call and answers nothing, which says nothing about whether it *can*. `probe_provider` asks three
+  times before condemning a model; a single failed probe is not evidence.
+- **`toml_edit` indexing panics by value and inserts by reference.** `node[key].is_none()` on a
+  missing key panics; `&mut node[key]` creates it. Writing a config the other way loses the file.
 - **A GPU-queue job may be holding tickets.** `processqueue gpu --info` before blaming a timeout.
 
 ## Where things live
@@ -127,6 +133,7 @@ Each cost real time. None are visible from the code.
 | `src/bin/lilguy.rs` | the command a person or their agent drives; `src/main.rs` is the daemon |
 | `src/doctor.rs` | every check, shared by `lilguy doctor` and `lilguysd --check` |
 | `src/service.rs` | finding, starting and stopping the daemon, with or without systemd |
+| `src/setup.rs` | what this machine has, and the wizard that turns it into a config that boots |
 | `src/app.rs` | wiring: surface, tick, input region, painting, intent enactment, the reflex map |
 | `src/guy.rs` | one roster member — body, gate, quantiser, mind, voice, cross-perception |
 | `src/locomotion.rs` | the body — steering, idle regiment, its own feelings |

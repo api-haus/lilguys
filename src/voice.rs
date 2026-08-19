@@ -93,6 +93,21 @@ impl Voice {
     }
 }
 
+/// Says one sentence and waits for it, so `lilguy voice test` is audible rather than theoretical.
+pub fn speak_once(config: &VoiceConfig, spec: Option<&str>, text: &str) -> Result<String> {
+    let (engine_name, voice) = config.resolve(spec);
+    let engine = config
+        .engines
+        .get(&engine_name)
+        .cloned()
+        .with_context(|| format!("no [voice.engines.{engine_name}]"))?;
+    if engine.synth.is_empty() {
+        bail!("[voice.engines.{engine_name}] has an empty synth command");
+    }
+    utter(&engine, config, &voice, VOICES.fetch_add(1, Ordering::Relaxed), text)?;
+    Ok(format!("{engine_name}/{voice}"))
+}
+
 fn utter(engine: &Engine, config: &VoiceConfig, voice: &str, id: usize, text: &str) -> Result<()> {
     // Two of them speaking at once must not write over each other's scratch file.
     let out = std::env::temp_dir().join(format!("lilguys-{}-{id}.wav", std::process::id()));

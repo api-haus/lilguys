@@ -329,10 +329,42 @@ pub struct Probe {
 /// Reachability plus the only capability that matters: does this model return `tool_calls`, or
 /// does it write calls into the message text? A model that cannot do the former is not usable.
 pub fn probe(config: &Config) -> Result<Probe> {
-    let client = Client::new(config.provider()?.clone())?;
+    probe_provider(config.provider()?)
+}
+
+/// The same question asked of a provider that is not the configured one — what `lilguy provider
+/// use` and `lilguy setup` need before they will write anything into a config file.
+pub fn probe_provider(provider: &crate::config::Provider) -> Result<Probe> {
+    probe_provider_n(provider, ATTEMPTS)
+}
+
+/// The same, with the patience named — setup tries several models and cannot spend three turns
+/// on each of them.
+pub fn probe_provider_n(provider: &crate::config::Provider, attempts: usize) -> Result<Probe> {
+    let client = Client::new(provider.clone())?;
+    let mut last = Probe { native_tools: false, detail: "never answered".into() };
+    // A reasoning model sometimes spends a whole turn thinking and calls nothing, which says
+    // nothing either way about whether it *can*. Ask again before condemning it.
+    for attempt in 1..=attempts.max(1) {
+        last = one_probe(&client)?;
+        if last.native_tools {
+            return Ok(last);
+        }
+        last.detail = format!("{} (attempt {attempt} of {attempts})", last.detail);
+    }
+    Ok(last)
+}
+
+/// Enough tries that a model which thinks its way past the call once is not written off for it.
+const ATTEMPTS: usize = 3;
+
+fn one_probe(client: &Client) -> Result<Probe> {
     let reply = client.chat(
         &[
-            Message::system("You are a creature on a desktop. Respond only by calling tools."),
+            Message::system(
+                "You are a creature on a desktop. Answer only by calling exactly one tool. \
+                 Never reply with text.",
+            ),
             Message::user("[45s] - the user started watching a long video about films"),
         ],
         &capability::schemas(),

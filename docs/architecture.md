@@ -479,7 +479,10 @@ onto the bundled defaults, so it need only contain what differs.
 to. Nobody hand-configures a thing like this, so the CLI is built for a caller that is a program:
 `--json` on everything, an exit code that means something, and every command safe to run twice.
 `doctor` reports one line per check with the fix beside it, so a caller can repair one thing rather
-than start over. See [todo/lilguy-cli.md](todo/lilguy-cli.md).
+than start over, and `setup` is the same checks with permission to fix them — which is what makes
+running it twice a no-op. Nothing is downloaded or installed without being asked; where nobody is
+there to answer, setup stops and puts the question in its output rather than guessing. See
+[todo/lilguy-cli.md](todo/lilguy-cli.md).
 
 ### 12.2 The sutra
 

@@ -49,6 +49,11 @@ impl Config {
         Ok((cfg, Some(path)))
     }
 
+    /// Where the config lives, whether or not it exists yet. `lilguy` writes here.
+    pub fn path_for_writing() -> Result<PathBuf> {
+        Self::path().context("no config directory; set $LILGUYS_CONFIG or $XDG_CONFIG_HOME")
+    }
+
     pub fn path() -> Option<PathBuf> {
         if let Some(p) = std::env::var_os("LILGUYS_CONFIG") {
             return Some(PathBuf::from(p));
@@ -70,17 +75,96 @@ impl Config {
         self.guys
             .iter()
             .map(|g| {
-                let path = character_file(&g.character, config_dir)
-                    .with_context(|| format!("no character named {:?}", g.character))?;
-                let raw = std::fs::read_to_string(&path)
-                    .with_context(|| format!("read {}", path.display()))?;
-                let character: Character = toml::from_str(&raw)
-                    .with_context(|| format!("parse {}", path.display()))?;
+                let (from, raw) = match character_file(&g.character, config_dir) {
+                    Some(path) => {
+                        let raw = std::fs::read_to_string(&path)
+                            .with_context(|| format!("read {}", path.display()))?;
+                        (path.display().to_string(), raw)
+                    }
+                    // An installed binary has no source tree beside it, and a cast nobody can load
+                    // is a cast nobody can run.
+                    None => {
+                        let raw = SHIPPED
+                            .iter()
+                            .find(|(name, _)| *name == g.character)
+                            .map(|(_, raw)| raw.to_string())
+                            .with_context(|| format!("no character named {:?}", g.character))?;
+                        (format!("(shipped {})", g.character), raw)
+                    }
+                };
+                let character: Character =
+                    toml::from_str(&raw).with_context(|| format!("parse {from}"))?;
                 Ok((g.clone(), character))
             })
             .collect()
     }
 }
+
+/// Changes settings in the user's own file, leaving every comment and every unrelated line where
+/// it was. Keys are dotted paths: `mind.provider`, `providers.ollama.model`.
+///
+/// A config somebody wrote by hand is theirs, and a tool that reformats it to change one field is
+/// a tool nobody runs twice.
+pub fn set(path: &Path, values: &[(&str, toml_edit::Value)]) -> Result<()> {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let mut doc: toml_edit::DocumentMut =
+        text.parse().with_context(|| format!("parse {}", path.display()))?;
+    for (key, value) in values {
+        let mut node = doc.as_item_mut();
+        let parts: Vec<&str> = key.split('.').collect();
+        for part in &parts[..parts.len() - 1] {
+            // Created explicitly, or toml_edit writes `mind = { enabled = true }` — valid, and
+            // nothing a person wants to find in a file they are expected to edit. Indexing by
+            // value panics on a missing key; indexing mutably inserts one.
+            let entry = &mut node[part];
+            if entry.is_none() {
+                *entry = toml_edit::Item::Table(toml_edit::Table::new());
+            }
+            // Implicit, so a table that only holds other tables does not print an empty header
+            // of its own; one with keys of its own still prints.
+            if let Some(table) = entry.as_table_mut() {
+                table.set_implicit(true);
+            }
+            node = entry;
+        }
+        // Whatever was written around the old value — the spacing, and the comment somebody left
+        // beside it — belongs to them and survives the change.
+        let leaf = &mut node[parts[parts.len() - 1]];
+        let mut value = value.clone();
+        if let Some(old) = leaf.as_value() {
+            if let Some(prefix) = old.decor().prefix() {
+                value.decor_mut().set_prefix(prefix.clone());
+            }
+            if let Some(suffix) = old.decor().suffix() {
+                value.decor_mut().set_suffix(suffix.clone());
+            }
+        }
+        *leaf = toml_edit::Item::Value(value);
+    }
+    if text.trim().is_empty() {
+        doc.decor_mut().set_prefix(HEADER);
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
+    }
+    // Written beside the target and renamed, so a full disk cannot leave half a config behind.
+    let tmp = path.with_extension("toml.new");
+    std::fs::write(&tmp, doc.to_string()).with_context(|| format!("write {}", tmp.display()))?;
+    std::fs::rename(&tmp, path).with_context(|| format!("replace {}", path.display()))?;
+    Ok(())
+}
+
+/// What a config `lilguy` wrote from nothing says about itself.
+const HEADER: &str = "\
+# lilguys. Anything not set here keeps the bundled default:\n\
+#   lilguysd --print-config    every setting, commented\n\
+#   lilguy doctor              validates it, and says how to fix what is wrong\n\n";
+
+/// The characters that come with the daemon, baked in so an installed binary is a working one.
+pub const SHIPPED: [(&str, &str); 2] = [
+    ("graybox", include_str!("../characters/graybox.toml")),
+    ("spongebob", include_str!("../characters/spongebob.toml")),
+];
 
 /// Beside the config first, so a personal character shadows a shipped one of the same name.
 pub fn character_file(name: &str, config_dir: Option<&Path>) -> Option<PathBuf> {
@@ -478,5 +562,55 @@ pub struct Motion {
 impl Default for Motion {
     fn default() -> Self {
         Config::default().motion
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("lilguys-test-{}-{name}.toml", std::process::id()))
+    }
+
+    #[test]
+    fn setting_a_field_leaves_the_rest_of_the_file_alone() {
+        let path = scratch("edit");
+        std::fs::write(
+            &path,
+            "# mine, and I wrote it\n[mind]\nprovider = \"local\"  # for now\nquantum = \"45s\"\n",
+        )
+        .unwrap();
+        set(&path, &[("mind.provider", "ollama".into())]).unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("# mine, and I wrote it"));
+        assert!(after.contains("# for now"));
+        assert!(after.contains("quantum = \"45s\""));
+        assert!(after.contains("provider = \"ollama\""));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn a_new_table_is_a_table_and_not_an_inline_one() {
+        let path = scratch("fresh");
+        std::fs::remove_file(&path).ok();
+        set(&path, &[("providers.ollama.model", "qwen3:4b".into()), ("voice.enabled", true.into())])
+            .unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("[providers.ollama]"), "{after}");
+        assert!(!after.contains("providers = {"), "{after}");
+        // Whatever was written has to parse back as a config, or setup wrote a broken file.
+        let doc: toml::Table = toml::from_str(&after).unwrap();
+        assert!(doc.contains_key("providers"));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn a_voice_spec_may_name_an_engine_a_voice_or_both() {
+        let voice = Config::default().voice;
+        assert_eq!(voice.resolve(None), (voice.engine.clone(), voice.voice.clone()));
+        assert_eq!(voice.resolve(Some("espeak")), ("espeak".into(), voice.voice.clone()));
+        assert_eq!(voice.resolve(Some("espeak:en-gb")), ("espeak".into(), "en-gb".into()));
+        assert_eq!(voice.resolve(Some("en_US-amy-low")), (voice.engine.clone(), "en_US-amy-low".into()));
     }
 }

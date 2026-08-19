@@ -84,6 +84,34 @@ pub struct FunctionCall {
     pub arguments: String,
 }
 
+/// Where a local backend usually answers. Probed before anything hosted is ever suggested.
+pub const LOCAL: [(&str, &str); 3] = [
+    ("ollama", "http://127.0.0.1:11434/v1"),
+    ("llamacpp", "http://127.0.0.1:8080/v1"),
+    ("lmstudio", "http://127.0.0.1:1234/v1"),
+];
+
+/// What an endpoint says it can run. Also the cheapest possible reachability test.
+pub fn models(url: &str, key: Option<&str>, timeout: std::time::Duration) -> Result<Vec<String>> {
+    let agent: ureq::Agent =
+        ureq::Agent::config_builder().timeout_global(Some(timeout)).build().into();
+    let mut req = agent.get(&format!("{}/models", url.trim_end_matches('/')));
+    if let Some(key) = key {
+        req = req.header("authorization", &format!("Bearer {key}"));
+    }
+    let mut res = req.call().context("no answer")?;
+    let parsed: Value = res.body_mut().read_json().context("the reply was not json")?;
+    let mut names: Vec<String> = parsed
+        .get("data")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter().filter_map(|m| m.get("id").and_then(Value::as_str)).map(str::to_string).collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    Ok(names)
+}
+
 pub struct Client {
     pub provider: Provider,
     agent: ureq::Agent,

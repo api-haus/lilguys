@@ -33,7 +33,7 @@ Where it already is, for reference.
 - Voice as a command template; piper and espeak, one voice per character
 - A roster of guys who witness each other, address each other by name, and share a floor on speech
 - `turns.jsonl` and `events.jsonl`; `--print-config`, `--print-prompt`
-- `lilguy doctor · start · stop · status · say`, all with `--json`
+- `lilguy setup · doctor · start · stop · status · say · provider · model · voice`, all with `--json`
 - A message, which is the one thing that closes the current slice instead of waiting for it
 
 ---
@@ -46,12 +46,11 @@ characters on their desktop that they can talk to.
 | work | design | size |
 |---|---|---|
 | Input surface: click him, type, Escape closes; reuses the bubble renderer | [talking-to-him](todo/talking-to-him.md) | 2 days |
-| `lilguy provider list/use`, `lilguy model pull`, `lilguy voice list/use/test` | [lilguy-cli](todo/lilguy-cli.md) | 2 days |
-| `lilguy setup` — probe providers, probe **native tool calls**, pull a model, fetch a voice, install the unit | [lilguy-cli](todo/lilguy-cli.md) | 3 days |
 
 Landed: `doctor`, `start/stop/status`, `say`, `Observation::Told` and the slice it cuts short,
-per-guy voices, the shared floor on silence, `speak`'s optional `to`, and the prompt tuning that
-makes being addressed worth answering.
+per-guy voices, the shared floor on silence, `speak`'s optional `to`, the prompt tuning that makes
+being addressed worth answering, `provider`/`model`/`voice`, and `setup` — which is all of them in
+order, with permission to fix what it finds.
 
 **Why first:** everything else is worth more if somebody else can run it, and `lilguy say` unblocked
 the message path that Phase 7 needs.

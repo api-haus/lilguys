@@ -10,15 +10,27 @@ nobody has to know the daemon has flags:
 
 ```bash
 cargo build --release
+./target/release/lilguy setup           # find a model, find a voice, put them on screen
 ./target/release/lilguy doctor          # every check, one line each, with the fix for what is wrong
-./target/release/lilguy start           # the systemd unit if there is one, a detached process if not
 ./target/release/lilguy status          # who is running, who is on screen
 ./target/release/lilguy say "hello"     # talk to them; an answer is optional
-./target/release/lilguy stop
+./target/release/lilguy start | stop
 ```
 
-Every command takes `--json`, because in practice the thing setting this up is somebody's coding
-agent rather than somebody's afternoon.
+`setup` is `doctor` with permission to fix things: it probes the local endpoints for a model that
+can do **native tool calls**, offers to pull one if nothing can, finds or fetches a voice, and
+installs the systemd unit. Running it twice changes nothing the second time.
+
+Every command takes `--json` and exits non-zero when something is wrong, because in practice the
+thing setting this up is somebody's coding agent rather than somebody's afternoon. Nothing is ever
+downloaded or installed without being asked; `--yes` is how a caller answers in advance.
+
+```bash
+./target/release/lilguy provider list   # what answers on this machine, and what it can run
+./target/release/lilguy model use qwen3:4b
+./target/release/lilguy voice list      # engines present, voices downloaded
+./target/release/lilguy voice test      # hear it, rather than believe it
+```
 
 Always on, which is the point of it:
 

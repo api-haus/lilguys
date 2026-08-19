@@ -1031,6 +1031,7 @@ dependencies = [
  "serde_json",
  "smithay-client-toolkit",
  "toml",
+ "toml_edit",
  "ureq",
  "wayland-client",
  "wayland-protocols",
@@ -1847,6 +1848,7 @@ dependencies = [
  "indexmap",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 

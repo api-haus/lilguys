@@ -1,8 +1,7 @@
 # `lilguy` — the CLI that sets him up
 
-**Status:** `doctor`, `start`, `stop`, `status` and `say` are built. `provider`, `model`, `voice`,
-`setup`, `plugin` and `integrate` are not, so the install is still "write a TOML by hand and know
-what a tool-calling model is".
+**Status:** `setup`, `doctor`, `start`, `stop`, `status`, `say`, `provider`, `model` and `voice` are
+built. `plugin` and `integrate` are not, and wait on the designs they belong to.
 
 Nobody is going to hand-configure this. In practice they will ask their coding agent to set it up,
 which means the real user of the installer is **another program**, and that should shape every
@@ -58,7 +57,9 @@ The wizard's whole job is turning "what is on this machine" into a config that b
 1. **Provider.** Probe the usual local endpoints (ollama on 11434, llama.cpp on 8080, LM Studio on
    1234) before offering anything hosted. If one answers, list its models and — critically — probe
    each for **native tool calls**, because most small ones fail and the failure is otherwise
-   invisible until nothing happens for an hour.
+   invisible until nothing happens for an hour. Probing every model on a machine with fifteen of
+   them is minutes of waiting, so candidates are ordered by family and only the first few are
+   tried.
 2. **Model.** If nothing local is tool-capable, offer to pull one sized to the machine's VRAM.
    Reasoning models need a `max_tokens` in the thousands; setup should set that, not leave the user
    to discover it from a probe message.
@@ -112,8 +113,12 @@ so nobody ever needs to know the daemon has flags.
 2. `start/stop/status` over the systemd unit.
 3. `say`, which is a one-liner over the inbox socket and unblocks
    [talking-to-him.md](talking-to-him.md).
-4. `provider` and `model`, including the tool-call probe.
-5. `voice`, including installing piper and fetching a voice.
-6. `setup`, which is a script over the above.
+4. ~~`provider` and `model`, including the tool-call probe.~~ Done — and the probe asks three
+   times, because a reasoning model that thinks its way past the call once is not incapable.
+5. ~~`voice`, including fetching a voice.~~ Done: `voice fetch` pulls a piper model, `voice test`
+   makes the choice audible. Installing piper itself is still the person's job.
+6. ~~`setup`, which is a script over the above.~~ Done. It keeps what already works, probes the
+   local endpoints in turn, offers to pull a model sized to the machine's VRAM when nothing on it
+   can do tool calls, finds or fetches a voice, and installs the unit.
 7. `plugin`, after [character-packages.md](character-packages.md) exists.
 8. `integrate`, after [agent-integration.md](agent-integration.md).

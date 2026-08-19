@@ -13,6 +13,7 @@ pub mod log;
 pub mod mind;
 pub mod sensors;
 pub mod service;
+pub mod setup;
 pub mod voice;
 
 /// The only asset the daemon cannot start without. A check, not an assumption.
