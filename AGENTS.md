@@ -65,12 +65,9 @@ process group otherwise. `pkill -x lilguysd` stops it. For a real always-on inst
 
 ## Planned, not built
 
-- [docs/todo/soul-hologram-split.md](docs/todo/soul-hologram-split.md) — two processes, so the mind
-  can restart without the character blinking out. Do this first; the scripting work lands on top.
-- [docs/todo/luau-scripting.md](docs/todo/luau-scripting.md) — sandboxed Luau drives and character
-  packages, composing through the observation stream rather than through each other.
-- [docs/todo/three-process-split.md](docs/todo/three-process-split.md) — pulling the mind out of the
-  soul so the part iterated on constantly is the cheapest to discard. Trigger-gated; not soon.
+[docs/todo/](docs/todo/) — eight designs with their dependency order and open questions.
+Start at [docs/todo/README.md](docs/todo/README.md); the soul/hologram split comes first and most of
+the rest waits on it.
 
 ## Adding things
 
