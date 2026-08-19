@@ -248,6 +248,70 @@ If the `might` tier is unconfigured or spent, `composer` emits nothing and the p
 quiet. That is the degradation story from [model-tiers.md](model-tiers.md), expressed as a stream
 that stops producing rather than a call that fails.
 
+### Time: the third way anything starts
+
+There are exactly three reasons something happens, and until now only two existed:
+
+| primitive | starts because | good for |
+|---|---|---|
+| `on` / `:to(fn)` | something happened | reacting |
+| `every("20m", fn)` | time passed | drips, decay, polling |
+| `cron("0 9 * * 1-5", fn)` | it is now a particular time | **routine** |
+
+The third is what makes a character have a *life* rather than a temperament. SpongeBob going to
+work at eight, Squidward practising at six, a Monday that feels different from a Friday — none of
+that is expressible with an interval, because an interval does not know what time it is.
+
+```lua
+-- Both forms, because 5-field cron is precise and unreadable and sometimes you want each.
+ctx.cron("0 9 * * 1-5", function() ... end)     -- weekdays at nine
+ctx.daily("18:30", function() ... end)
+ctx.weekly("sun 11:00", function() ... end)
+ctx.monthly(1, "00:00", function() ... end)
+```
+
+Parsing is a solved problem; use a cron crate and expose it rather than inventing a schedule
+language.
+
+#### The decisions a wall clock forces
+
+Monotonic timers have none of these. A schedule has all of them, and guessing wrong is the
+difference between charming and infuriating.
+
+- **A missed job.** The laptop was asleep at nine. On waking: fire once, or skip to tomorrow?
+  `catchup = "once"` (default) suits world state — the shop should still open. `catchup = "skip"`
+  suits anything that speaks, because nobody wants four stale good-mornings at noon.
+- **Last-run must persist.** A weekly job that forgets across a restart is a job that fires on
+  every restart. It belongs in script state, which already persists.
+- **Nobody home.** If the person is away, a schedule may still move the world, but must not
+  accumulate things to say. The presence sensor already knows; the rule is that authored *events*
+  fire and authored *speech opportunities* expire.
+- **Local time, and it changes.** DST shifts, timezones travel. Resolve against local time at fire
+  moment, never precompute a UTC instant an hour ahead.
+
+#### Why this ties the rest together
+
+**Scheduled spend is knowable in advance, and reactive spend is not.** A cron job calling `might`
+at nine every weekday commits the person to twenty-two expensive calls a month, and that is a
+number the engine can compute before anything runs:
+
+```lua
+-- One good thought a day, at a time nobody is watching the clock.
+ctx.daily("08:45", function()
+  local plan = llm.ask("might", "What kind of day is it going to be at the Krusty Krab?")
+  if plan then ctx.state.today = plan end
+end)
+```
+
+Which means `lilguy doctor` can answer a question no reactive system can: *what will this plugin
+cost me?* Sum the schedules, multiply by the tiers they name, and print it. A plugin whose schedule
+exceeds the configured `might` budget can be refused at install time rather than discovered at the
+end of the month.
+
+That is the argument for cron being a first-class engine primitive rather than something a script
+hand-rolls with `every` and a clock check: **the engine can only reason about a schedule it can
+see.**
+
 ### Rules the engine enforces
 
 - **An operator that throws drops that event and logs it.** It never kills the stream. One bad

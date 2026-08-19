@@ -64,6 +64,7 @@ can say.
 | `ctx.feel{…}` | an interoceptive `Feeling`, same as the inbox |
 | `ctx.events` | this character's stream, with the full operator set |
 | `ctx.every(interval, fn)` | a timer in seconds, never a frame hook |
+| `ctx.cron(expr, fn)` · `ctx.daily` · `ctx.weekly` | wall-clock schedule, with a catch-up policy |
 | `ctx.state` | a table persisted to disk per script |
 | `ctx.config` | that script's own `[scripts.<name>]` table |
 | `ctx.log(msg)` | `events.jsonl` |
@@ -117,9 +118,11 @@ Do this after the soul/hologram split, so scripts land on the side that can be r
 4. `ctx.every` on a slow timer; `ctx.events` as an observable, with `where`, `map`, `filter`,
    `debounce`, `throttle` and `to`. The operator set is shared with world scripts — one API, two
    scopes.
-5. Interrupt, memory ceiling, and `feel` rate limit — all three before any script ships.
-6. Character directories and the `[character]` config key.
-7. Ship `hunger.lua` as the worked example, and cite it in the docs rather than describing it.
+5. `ctx.cron` and friends, with persisted last-run and a catch-up policy. A drive with a routine is
+   a different creature from one with only a decay curve.
+6. Interrupt, memory ceiling, and `feel` rate limit — all three before any script ships.
+7. Character directories and the `[character]` config key.
+8. Ship `hunger.lua` as the worked example, and cite it in the docs rather than describing it.
 
 ## Open questions
 

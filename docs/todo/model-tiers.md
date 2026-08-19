@@ -76,6 +76,25 @@ existing `turns_per_hour` becomes the `mind` tier's `per_hour`, which is what it
 That is a small change and worth making before any plugin exists, because it settles the vocabulary
 plugins will be written against.
 
+## Reserved spend
+
+Scheduled calls are the one kind of spend that can be known before it happens. A plugin's cron
+entries name their tiers, so the engine can sum them:
+
+```
+might   6/hour, 40/day configured
+        bikini-bottom reserves 1/day at 08:45
+        3 free after reservations
+```
+
+Two things follow. A plugin whose schedule exceeds the budget can be **refused at install time**
+rather than discovered at the end of the month. And `lilguy doctor` can answer *what will this cost
+me*, which is otherwise unanswerable for a reactive system.
+
+This is the strongest argument for cron being an engine primitive rather than a script hand-rolling
+it with `every` and a clock check: the engine can only reason about a schedule it can see. See
+[world-scripting.md](world-scripting.md).
+
 ## Open questions
 
 - Should a tier be able to name *several* providers with fallback on failure? Useful when a local
