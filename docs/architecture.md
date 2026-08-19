@@ -29,9 +29,11 @@ flowchart LR
 
     WL --> SEN
     DB --> SEN
+    IDLE["idle regiment<br/><i>needs no events</i>"]
     SEN --> GATE
     GATE -->|survivors| QUANT
-    GATE -.->|small local emote| BODY
+    GATE -.->|reflex arc: face only| BODY
+    IDLE --> BODY
     QUANT -->|one slice| MIND
     MIND -->|intents| BODY
     MIND -->|speak| VOX
@@ -63,6 +65,16 @@ the next when it has to.
 
 The reflex clock is the render tick. It drops to 8 Hz whenever the character is settled and nothing
 is animating, which is most of the time.
+
+Two distinct things run without a model, and they are easy to confuse:
+
+- **The idle regiment** needs no events at all. Breathing, blinking on an interval deliberately
+  irrational against the breath cycle, the figure-of-eight float, gaze tracking with eyes leading
+  head leading body, turning to face a pointer that stays behind him, and `wander_per_minute`. All
+  of it lives in `locomotion.rs` and runs on every tick. This is what keeps him alive when nothing
+  whatsoever is happening.
+- **The reflex arc** is event-driven: the gate hands an observation straight to the body, skipping
+  the model entirely. See §4.1.
 
 ## 3. What "quantised event flow" means
 
@@ -135,6 +147,32 @@ stateDiagram-v2
 Every observation carries a **key** — `focus:zen:<title>`, `media:<url>:<title>` — and a repeat of
 the same key inside `novelty_window` is dropped outright. Alt-tabbing between two windows twenty
 times produces two observations, not forty.
+
+### 4.1 The reflex arc
+
+Two paths reach `Verdict::Emote`, and both bypass the model:
+
+1. **Ambient observations** — a workspace switch or a presence change. These colour the mood but are
+   never worth a token on their own, so they are answered locally and still appear in the next
+   slice as context.
+2. **A demoted thought** — a dwell matured, but `turns_per_hour` was already spent. Rather than
+   discard it, the verdict drops from Think to Emote so something visible still happens.
+
+The answer is a fixed mapping from observation to expression, applied directly to the body:
+
+| observation | expression | hold |
+|---|---|---|
+| user came back | pleased 0.55 | 6 s |
+| user went away | sleepy 0.70 | 30 s |
+| workspace switched | curious 0.30 | 3 s |
+| focus changed | curious 0.45 | 5 s |
+| window retitled | curious 0.22 | 2.5 s |
+| playback started | amused 0.45 | 8 s |
+| playback stopped | neutral 0.20 | 3 s |
+
+**Facial only, on purpose.** A gesture is a deliberate intention and stays the mind's to decide, so
+the worst this layer can do with the model unreachable is pull a face. It never moves him, never
+speaks, and never spends anything.
 
 Dwell is what stops the buddy reacting to things you passed through. A window must hold focus for
 `focus_dwell`; a track must play for `media_dwell`. Skipping a video means its transcript is never

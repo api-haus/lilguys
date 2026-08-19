@@ -10,6 +10,7 @@ use crate::gpu::Gpu;
 use crate::hypr::Hypr;
 use crate::locomotion::{Body, Drift, Target};
 use crate::sensors::wayland::Sensors;
+use crate::sensors::Observation;
 use crate::voice::Voice;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState, Region},
@@ -196,9 +197,10 @@ impl App {
         let sensed = self.sensors.bus.drain();
         if !sensed.is_empty() || self.attention.waiting() > 0 {
             for (verdict, what) in self.attention.consider(sensed, now) {
-                // A local emote keeps the buddy alive between model turns, which are minutes apart.
+                // Model turns are minutes apart and capped, so the gate answers locally in the gap.
                 if verdict == Verdict::Emote {
-                    self.body.feel(Emotion::Curious, 0.35, 4.0);
+                    let (emotion, intensity, hold) = reflex(&what);
+                    self.body.feel(emotion, intensity, hold);
                 }
                 self.quantiser.observe(what.summary());
             }
@@ -433,6 +435,23 @@ impl App {
             region.add(rect[0], rect[1], rect[2], rect[3]);
             self.layer.wl_surface().set_input_region(Some(region.wl_region()));
         }
+    }
+}
+
+/// The reflex arc: an observation the gate let through, answered without a model.
+///
+/// Facial only. A gesture is a deliberate intention and stays the mind's to decide, so the worst
+/// this layer can do while the model is unreachable is pull a face.
+fn reflex(what: &Observation) -> (Emotion, f32, f32) {
+    match what {
+        Observation::Presence { present: true } => (Emotion::Pleased, 0.55, 6.0),
+        Observation::Presence { present: false } => (Emotion::Sleepy, 0.7, 30.0),
+        Observation::Workspace { .. } => (Emotion::Curious, 0.30, 3.0),
+        Observation::Focus { .. } => (Emotion::Curious, 0.45, 5.0),
+        // A retitle is the same window saying something changed — a glance, not a look.
+        Observation::Title { .. } => (Emotion::Curious, 0.22, 2.5),
+        Observation::Media { playing: true, .. } => (Emotion::Amused, 0.45, 8.0),
+        Observation::Media { playing: false, .. } => (Emotion::Neutral, 0.2, 3.0),
     }
 }
 
