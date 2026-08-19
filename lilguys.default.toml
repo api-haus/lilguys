@@ -117,7 +117,7 @@ queue_limit = 2
 # piper 1.7+ (`uv tool install piper-tts`). `voice` is the path to a .onnx model; download one
 # from https://huggingface.co/rhasspy/piper-voices. Text arrives on stdin.
 [voice.engines.piper]
-synth = ["piper", "-m", "{voice}", "--length-scale", "{speed}", "-f", "{out}"]
+synth = ["piper", "-m", "{voice}", "--length-scale", "{speed}", "--volume", "{volume}", "-f", "{out}"]
 play = ["pw-play", "{out}"]
 
 [voice.engines.espeak]

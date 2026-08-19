@@ -97,9 +97,6 @@ impl Client {
         Ok(Self { provider, agent, key })
     }
 
-    pub fn model(&self) -> &str {
-        &self.provider.model
-    }
 
     pub fn chat(&self, messages: &[Message], tools: &Value) -> Result<Message> {
         let mut body = json!({

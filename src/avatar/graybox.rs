@@ -144,11 +144,8 @@ impl Avatar for Graybox {
             let s = (bob * 0.8 + phase).sin() * 0.16 + lean[0] * 0.7;
             let shoulder = add(chest, [side * 0.115, -0.015]);
             // A gesture overrides the drift pose on whichever arm it uses.
-            let (mut elbow, mut hand) = (
-                add(shoulder, [s * 0.13 - side * 0.02, 0.155 + lean[1] * 0.5]),
-                [0.0, 0.0],
-            );
-            hand = add(elbow, [s * 0.10, 0.145 + lean[1] * 0.5]);
+            let mut elbow = add(shoulder, [s * 0.13 - side * 0.02, 0.155 + lean[1] * 0.5]);
+            let mut hand = add(elbow, [s * 0.10, 0.145 + lean[1] * 0.5]);
             match gk {
                 Some(Gesture::Wave) if lead => {
                     elbow = add(shoulder, [side * 0.10, 0.02]);
@@ -230,7 +227,11 @@ impl Avatar for Graybox {
             );
         }
         let mouth = to_px(rot_about(add(head_c, [yaw * 0.020, 0.085]), head_c, roll));
-        let open = p.get(Param::MouthOpen).clamp(0.0, 1.0);
+        // Speech owns the mouth outright, so a held expression cannot clamp it shut mid-word.
+        let open = match self.drive.speaking {
+            true => p.get(Param::MouthOpen).clamp(0.12, 1.0),
+            false => p.get(Param::MouthOpen).clamp(0.0, 1.0),
+        };
         painter.rrect(mouth[0], mouth[1], (0.075 + p.get(Param::MouthForm) * 0.03) * px, (0.012 + open * 0.075) * px, 0.02 * px, INK);
 
         if !self.annotate {

@@ -87,10 +87,6 @@ impl Pose {
         self.v[p as usize] = x;
     }
 
-    pub fn add(&mut self, p: Param, x: f32) {
-        self.v[p as usize] += x;
-    }
-
     /// Exponential approach, framerate-independent. `rate` is the fraction closed per second.
     pub fn ease_to(&mut self, p: Param, target: f32, rate: f32, dt: f32) {
         let k = 1.0 - (-rate * dt).exp();
@@ -240,11 +236,6 @@ pub trait Avatar {
 
     /// Advance internal animation (physics, motion playback) — never reads the world.
     fn advance(&mut self, pose: &Pose, drive: &Drive, dt: f32);
-
-    /// The emotions this adapter can show. The mind is offered exactly this list.
-    fn emotions(&self) -> &'static [&'static str] {
-        &Emotion::NAMES
-    }
 
     /// Emit geometry. `origin` is the character's ground point in surface pixels, `facing` is
     /// -1.0 (left) to 1.0 (right), `scale` is pixels per rig unit.

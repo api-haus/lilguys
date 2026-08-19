@@ -62,7 +62,6 @@ pub struct Reaction {
 
 pub enum ToMind {
     Tick(Quantum),
-    Stop,
 }
 
 /// Runs the model loop on its own thread. Blocking HTTP never touches the render loop.
@@ -79,8 +78,7 @@ pub fn spawn(
         .name("mind".into())
         .spawn(move || {
             let mut reactor = Reactor::new(client, mind, system);
-            while let Ok(msg) = rx.recv() {
-                let ToMind::Tick(q) = msg else { return };
+            while let Ok(ToMind::Tick(q)) = rx.recv() {
                 let reaction = reactor.turn(q);
                 if out.send(reaction).is_err() {
                     return;
@@ -306,7 +304,6 @@ impl Quantiser {
 
 /// What a provider can actually do, answered before a surface is ever opened.
 pub struct Probe {
-    pub reachable: bool,
     pub native_tools: bool,
     pub detail: String,
 }
@@ -332,5 +329,5 @@ pub fn probe(config: &Config) -> Result<Probe> {
     } else {
         format!("replied with text: {}", crate::sensors::clip(text.trim(), 60))
     };
-    Ok(Probe { reachable: true, native_tools: !calls.is_empty(), detail })
+    Ok(Probe { native_tools: !calls.is_empty(), detail })
 }

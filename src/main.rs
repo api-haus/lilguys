@@ -124,7 +124,6 @@ fn main() -> Result<()> {
         layer,
         Painter::new(&font)?,
         Hypr::from_env()?,
-        conn.clone(),
         sensors,
         cfg,
         voice,

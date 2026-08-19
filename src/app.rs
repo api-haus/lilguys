@@ -47,7 +47,6 @@ pub struct App {
     pub gpu: Option<Gpu>,
     pub painter: Painter,
     pub hypr: Hypr,
-    pub conn: Connection,
     pub sensors: Sensors,
     pub attention: Attention,
     pub config: Config,
@@ -89,7 +88,6 @@ impl App {
         layer: LayerSurface,
         painter: Painter,
         hypr: Hypr,
-        conn: Connection,
         sensors: Sensors,
         config: Config,
         voice: Voice,
@@ -107,7 +105,6 @@ impl App {
             gpu: None,
             painter,
             hypr,
-            conn,
             sensors,
             attention: Attention::new((&config).into()),
             quantiser: Quantiser::default(),
@@ -604,6 +601,15 @@ impl PointerHandler for App {
     ) {
         for event in events {
             if &event.surface != self.layer.wl_surface() {
+                continue;
+            }
+            // The input region is a rectangle, so a click inside it may still miss him. Asking
+            // the avatar keeps the silhouette authoritative even when the region cannot be.
+            let local = [
+                (event.position.0 as f32 - self.body.pos[0]) / self.scale() * self.body.facing,
+                (event.position.1 as f32 - self.body.pos[1]) / self.scale(),
+            ];
+            if matches!(event.kind, PointerEventKind::Press { .. }) && !self.avatar.hit(local) {
                 continue;
             }
             match event.kind {

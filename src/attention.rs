@@ -135,8 +135,10 @@ impl Attention {
         let mut out = Vec::new();
         self.fresh = 0;
         for s in incoming {
-            let v = self.judge(&s.what, now);
-            self.record(v, &s.what, now);
+            // Judge by when it happened, not when it was drained. A buffered burst must not all
+            // look simultaneous, and a replayed one must not look fresh.
+            let v = self.judge(&s.what, s.at);
+            self.record(v, &s.what, s.at);
             if matches!(v, Verdict::Emote | Verdict::Think) {
                 out.push((v, s.what));
             }

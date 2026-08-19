@@ -195,8 +195,4 @@ impl Painter {
         pen - x
     }
 
-    pub fn text_width(&mut self, px: f32, s: &str) -> f32 {
-        let k = px / ATLAS_PX;
-        s.chars().map(|c| self.glyph(c).advance * k).sum()
-    }
 }

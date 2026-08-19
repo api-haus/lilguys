@@ -90,6 +90,7 @@ fn utter(engine: &Engine, config: &VoiceConfig, text: &str) -> Result<()> {
         arg.replace("{text}", text)
             .replace("{voice}", &voice)
             .replace("{speed}", &format!("{:.2}", 1.0 / config.speed.max(0.05)))
+            .replace("{volume}", &format!("{:.2}", config.volume.clamp(0.0, 1.0)))
             .replace("{out}", &out_str)
     };
 

@@ -13,13 +13,12 @@ static SINK: OnceLock<Option<Mutex<Sink>>> = OnceLock::new();
 struct Sink {
     turns: File,
     events: File,
-    path: PathBuf,
 }
 
 /// Opens the log files once. Everything after this is fire-and-forget: a full disk must never
 /// take the buddy down.
 pub fn init(config: &Logging) -> Option<PathBuf> {
-    let dir = match config.enabled {
+    let dir: PathBuf = match config.enabled {
         false => return None,
         true => config.dir.clone().unwrap_or_else(default_dir),
     };
@@ -34,9 +33,8 @@ pub fn init(config: &Logging) -> Option<PathBuf> {
         eprintln!("logging disabled: cannot open files in {}", dir.display());
         return None;
     };
-    let path = dir.clone();
-    SINK.set(Some(Mutex::new(Sink { turns, events, path: dir }))).ok();
-    Some(path)
+    SINK.set(Some(Mutex::new(Sink { turns, events }))).ok();
+    Some(dir)
 }
 
 fn default_dir() -> PathBuf {
@@ -46,9 +44,6 @@ fn default_dir() -> PathBuf {
         .join("lilguys")
 }
 
-pub fn dir() -> Option<PathBuf> {
-    SINK.get()?.as_ref()?.lock().ok().map(|s| s.path.clone())
-}
 
 fn stamp() -> f64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)

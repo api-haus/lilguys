@@ -173,9 +173,6 @@ impl Body {
         self.gesture.map(|(g, t)| (g, (t / g.duration()).clamp(0.0, 1.0)))
     }
 
-    pub fn target_label(&self) -> Option<&str> {
-        self.target.as_ref().map(|t| t.label.as_str())
-    }
 
     pub fn bob_phase(&self) -> f32 {
         self.bob

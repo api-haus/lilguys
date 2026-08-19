@@ -106,9 +106,13 @@ impl Observation {
             Observation::Presence { present } => {
                 format!("user {}", if *present { "back" } else { "away" })
             }
-            Observation::Media { title, artist, playing, .. } => {
-                format!("{} {} — {}", if *playing { "playing" } else { "paused" }, clip(artist, 16), clip(title, 26))
-            }
+            Observation::Media { player, title, artist, playing, .. } => format!(
+                "{} in {} — {} · {}",
+                if *playing { "playing" } else { "paused" },
+                clip(player, 12),
+                clip(artist, 16),
+                clip(title, 26)
+            ),
             Observation::Feeling(f) if f.reflective => {
                 // The cause is the line immediately above this one, so name it, do not restate it.
                 let at = f.detail.trim_start_matches("you feel ").trim_start_matches("you found ");
