@@ -13,7 +13,12 @@ flowchart TD
     SPLIT["soul / hologram split"] --> LUAU["luau scripting"]
     SPLIT --> AGENT["agent integration"]
     SPLIT --> THREE["three-process split"]
+    SPLIT --> WORLD
     LUAU --> PKG["character packages"]
+    LUAU --> WORLD["world scripting"]
+    TIERS["model tiers"] --> WORLD
+    PKG --> WORLD
+    MANY["many guys"] --> WORLD
     TALK["talking to him"] --> AGENT
     CLI["lilguy CLI"] --> PKG
     TALK -.->|"`lilguy say` unblocks it"| CLI
@@ -31,6 +36,8 @@ flowchart TD
 | [character-packages](character-packages.md) | look, voice, drives, entities and interaction, shipped as a directory | after scripting |
 | [agent-integration](agent-integration.md) | be the face of hermes or openclaw; the original reason for all this | after the split and the message path |
 | [object-persistence](object-persistence.md) | whether persistent things need representing at all | open question; may be answered by doing nothing |
+| [model-tiers](model-tiers.md) | name what a call is worth, not what answers it; engine-enforced budgets | soon — it settles the vocabulary plugins are written against |
+| [world-scripting](world-scripting.md) | a thin core; situations, arcs and casts authored in Luau | after tiers and the Luau host |
 | [many-guys](many-guys.md) | a cast rather than a mascot; the roster works, the social layer is thin | now — voices and addressing are the gaps |
 | [three-process-split](three-process-split.md) | pull the mind out of the soul | trigger-gated; not soon |
 
@@ -39,3 +46,8 @@ flowchart TD
 Every one of these is the same move: **add a way for something to happen, and a way for him to find
 out that it happened.** A capability without its event is a puppet string. That is philosophy rule 5,
 and it is the thing to check any of these designs against when they start to sprawl.
+
+Which is also the argument for a thin core. Drives, entities, locations, weather, plot — all of them
+are that one shape. Built separately in Rust they are seven subsystems that do not compose; built as
+one injection point in the core with everything above it in script, they are one subsystem that
+composes with itself. See [world-scripting](world-scripting.md).

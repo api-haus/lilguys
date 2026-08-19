@@ -131,7 +131,11 @@ These follow from the split. A change that breaks one of them is wrong even if i
    no injecting state into the prompt outside the stream. The one exception is the framing line,
    which carries *current* state rather than *changed* state — because a feeling that never changes
    is still true, and an event stream alone cannot say so.
-7. **Silence is the default everywhere.** Calling no tool is correct. Sending no slice is correct.
+7. **Whatever authors the world may not author a character.** A script, a director, a plugin — any
+   of them may make something *true* for a creature, however forcefully. None of them may make it
+   *say* or *do* anything. Events in, never intents. The moment a script can put words in a mouth,
+   the characters are puppets reading a screenplay and nothing above is worth having.
+8. **Silence is the default everywhere.** Calling no tool is correct. Sending no slice is correct.
    Discarding an observation is correct. The gate exists to make silence cheap, and every addition
    must make silence more likely, not less.
 

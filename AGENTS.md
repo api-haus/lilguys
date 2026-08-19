@@ -69,7 +69,7 @@ process group otherwise. `pkill -x lilguysd` stops it. For a real always-on inst
 
 ## Planned, not built
 
-[docs/todo/](docs/todo/) — eight designs with their dependency order and open questions.
+[docs/todo/](docs/todo/) — eleven designs with their dependency order and open questions.
 Start at [docs/todo/README.md](docs/todo/README.md); the soul/hologram split comes first and most of
 the rest waits on it.
 
