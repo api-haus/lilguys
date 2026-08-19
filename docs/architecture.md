@@ -265,6 +265,22 @@ costs no tokens — and it still rides into the next slice for the mind to refle
 
 A feeding mechanic is therefore a script with a timer, outside this repo entirely.
 
+### 5.2 The message box
+
+Clicking a character opens a box above his head, in the bubble his thoughts use — typing where his
+thinking appears reads as talking *to* him, where a dialog would read as configuring him. Enter
+sends, Escape closes, and what it produces is the same `Told` observation `lilguy say` writes into
+the socket.
+
+A layer surface has `keyboard-interactivity: none`, which is why he never steals your typing. The
+box asks for it and gives it back, and the ways back are Escape, Enter, losing focus, and a
+watchdog at 45 seconds. It asks **exclusively** rather than on demand, because on-demand focus is
+granted by a click and the click that opened the box was delivered before the request could reach
+the compositor — every dmenu-style launcher on Wayland asks the same way.
+
+A drag opens nothing. Six pixels of pointer travel between press and release is the whole of
+telling a click from somebody moving him about.
+
 The Wayland sensors ride the same connection as the surface — no second socket, no second thread.
 MPRIS gets its own thread because D-Bus is blocking and a stalled bus must never stall rendering.
 

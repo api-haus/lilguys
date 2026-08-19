@@ -208,6 +208,11 @@ impl Body {
         self.feel_that("picked up", "someone has hold of you", "surprised", 0.8, 6.0);
     }
 
+    /// Somebody opened a box to type at him. Being listened to is felt before a word arrives.
+    pub fn listened_to(&mut self) {
+        self.feel_that("being spoken to", "somebody is typing at you", "curious", 0.6, 8.0);
+    }
+
     pub fn drag_to(&mut self, x: f32, y: f32) {
         if self.drift == Drift::Held {
             let next = [x, y + self.size * 0.35];

@@ -43,14 +43,13 @@ Where it already is, for reference.
 **Demo:** a person clones it, runs one command, answers three questions, and ends up with two
 characters on their desktop that they can talk to.
 
-| work | design | size |
-|---|---|---|
-| Input surface: click him, type, Escape closes; reuses the bubble renderer | [talking-to-him](todo/talking-to-him.md) | 2 days |
-
 Landed: `doctor`, `start/stop/status`, `say`, `Observation::Told` and the slice it cuts short,
 per-guy voices, the shared floor on silence, `speak`'s optional `to`, the prompt tuning that makes
-being addressed worth answering, `provider`/`model`/`voice`, and `setup` — which is all of them in
-order, with permission to fix what it finds.
+being addressed worth answering, `provider`/`model`/`voice`, `setup` — which is all of them in
+order, with permission to fix what it finds — and the box that opens when you click one of them.
+
+**Left to prove:** the phase demo itself, on a machine that is not this one. Everything in it is
+built; nobody else has run it yet.
 
 **Why first:** everything else is worth more if somebody else can run it, and `lilguy say` unblocked
 the message path that Phase 7 needs.

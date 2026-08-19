@@ -19,17 +19,20 @@ use smithay_client_toolkit::{
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
     seat::{
+        keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers},
         pointer::{PointerEvent, PointerEventKind, PointerHandler},
         Capability, SeatHandler, SeatState,
     },
     shell::{
-        wlr_layer::{LayerShellHandler, LayerSurface, LayerSurfaceConfigure},
+        wlr_layer::{
+            KeyboardInteractivity, LayerShellHandler, LayerSurface, LayerSurfaceConfigure,
+        },
         WaylandSurface,
     },
 };
 use std::time::Instant;
 use wayland_client::{
-    protocol::{wl_output, wl_pointer, wl_seat, wl_surface},
+    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface},
     Connection, QueueHandle,
 };
 
@@ -37,6 +40,24 @@ use wayland_client::{
 /// story, so it is measured in the HUD rather than assumed.
 const ACTIVE_HZ: f32 = 60.0;
 const IDLE_HZ: f32 = 8.0;
+
+/// A message box abandoned for this long closes itself and hands the keyboard back.
+const TYPING_TIMEOUT: f32 = 45.0;
+/// Longer than this is not a remark, and the box is not a text editor.
+const TYPING_CAP: usize = 200;
+
+/// A message being typed at one of them, above their head, in the bubble their thoughts use.
+pub struct Typing {
+    pub who: usize,
+    pub text: String,
+    last_key: Instant,
+}
+
+impl Typing {
+    fn idle_for(&self) -> f32 {
+        self.last_key.elapsed().as_secs_f32()
+    }
+}
 
 pub struct App {
     pub registry_state: RegistryState,
@@ -58,9 +79,15 @@ pub struct App {
     configured: bool,
 
     pointer: Option<wl_pointer::WlPointer>,
+    keyboard: Option<wl_keyboard::WlKeyboard>,
     hover: bool,
     /// Which of them is being dragged, if any.
     held: Option<usize>,
+    /// Where a press landed, so a click can be told from a drag on release.
+    pressed_at: Option<[f32; 2]>,
+    /// The message box, open above one of them. This is the only time the surface takes the
+    /// keyboard, and it gives it back on every exit path.
+    typing: Option<Typing>,
     last_tick: Instant,
     frame_ms: f32,
     frames: u32,
@@ -104,8 +131,11 @@ impl App {
             exit: false,
             configured: false,
             pointer: None,
+            keyboard: None,
             hover: false,
             held: None,
+            pressed_at: None,
+            typing: None,
             last_tick: Instant::now(),
             frame_ms: 0.0,
             frames: 0,
@@ -119,7 +149,10 @@ impl App {
 
     /// Seconds until the next tick. Falls to `IDLE_HZ` when nothing is animating.
     pub fn tick_interval(&self) -> f32 {
-        let busy = self.hover || self.held.is_some() || self.guys.iter().any(Guy::busy);
+        let busy = self.hover
+            || self.held.is_some()
+            || self.typing.is_some()
+            || self.guys.iter().any(Guy::busy);
         1.0 / if busy { ACTIVE_HZ } else { IDLE_HZ }
     }
 
@@ -130,6 +163,12 @@ impl App {
         let now = Instant::now();
         let dt = (now - self.last_tick).as_secs_f32().min(0.1);
         self.last_tick = now;
+
+        // A box left open holds the keyboard, and a keyboard held by a mistake is the worst bug
+        // this feature can have. It closes itself if nobody is typing.
+        if self.typing.as_ref().is_some_and(|t| t.idle_for() > TYPING_TIMEOUT) {
+            self.close_box();
+        }
 
         let cursor = self.hypr.cursor_pos().map(|(x, y)| [x, y]).unwrap_or([0.0, 0.0]);
         self.sense(now);
@@ -263,6 +302,44 @@ impl App {
         true
     }
 
+    /// Takes the keyboard, which a layer surface otherwise never does — that is why he never
+    /// steals your typing, and why every path out of here gives it back.
+    ///
+    /// Exclusive rather than on-demand: on-demand is granted by a click, and the click that opens
+    /// this box was delivered before the request could reach the compositor, so it would take a
+    /// second click to type. Every dmenu-style launcher on Wayland does the same thing.
+    fn open_box(&mut self, who: usize) {
+        if self.typing.is_some() {
+            return;
+        }
+        self.layer.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
+        self.layer.commit();
+        self.guys[who].body.listened_to();
+        self.typing = Some(Typing { who, text: String::new(), last_key: Instant::now() });
+    }
+
+    fn close_box(&mut self) {
+        if self.typing.take().is_none() {
+            return;
+        }
+        self.layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+        self.layer.commit();
+    }
+
+    /// The typed line enters the stream as an ordinary observation, addressed to whoever it was
+    /// typed at. Everybody in the room still hears it.
+    fn send_typed(&mut self) {
+        let Some(typing) = self.typing.take() else { return };
+        self.layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+        self.layer.commit();
+        let text = typing.text.trim().to_string();
+        if text.is_empty() {
+            return;
+        }
+        let to = self.guys.get(typing.who).map(|g| g.name.clone());
+        self.sensors.bus.push(Observation::Told { text, to });
+    }
+
     /// A surviving observation reads on the face, never as speech.
     fn express(guy: &mut Guy, dt: f32) {
         let Some((at, hold, _)) = guy.thought.as_ref() else { return };
@@ -367,19 +444,31 @@ impl App {
             y = if below { y + block + 6.0 } else { top - 8.0 };
         }
 
-        let Some((at, hold, text)) = self.guys[who].thought.clone() else { return };
-        let age = at.elapsed().as_secs_f32();
-        if age > hold {
-            return;
-        }
-        let alpha = ((hold - age) / 1.0).clamp(0.0, 1.0);
+        // A message being typed uses the bubble his thoughts use. Typing where his thinking
+        // appears reads as talking *to* him; a dialog box reads as configuring him.
+        let box_open = self.typing.as_ref().filter(|t| t.who == who).map(|t| {
+            let caret = if t.idle_for() % 1.0 < 0.5 { "|" } else { " " };
+            format!("{}{caret}", t.text)
+        });
+        let (text, alpha, tint) = match box_open {
+            Some(typed) => (typed, 1.0, rgba(30, 40, 62, 0.92)),
+            None => {
+                let Some((at, hold, text)) = self.guys[who].thought.clone() else { return };
+                let age = at.elapsed().as_secs_f32();
+                if age > hold {
+                    return;
+                }
+                let alpha = ((hold - age) / 1.0).clamp(0.0, 1.0);
+                (text, alpha, rgba(20, 22, 30, 0.82 * alpha))
+            }
+        };
 
         let lines = self.painter.wrap(13.0, 260.0, &text);
         let w = lines.iter().map(|l| self.painter.text_width(13.0, l)).fold(0.0, f32::max);
         let h = lines.len() as f32 * 17.0;
         let (bx, by) = (origin[0], if below { y + h * 0.5 } else { y - h * 0.5 });
 
-        let ink = rgba(20, 22, 30, 0.82 * alpha);
+        let ink = tint;
         self.painter.rrect(bx, by, w + 26.0, h + 20.0, 9.0, ink);
 
         // The tail is a run of shrinking bubbles from the thinker's head to the balloon, smallest
@@ -629,6 +718,14 @@ impl SeatHandler for App {
                 Err(e) => eprintln!("pointer: {e}"),
             }
         }
+        // Bound now, used only while a box is open — the surface asks for focus rather than
+        // holding it, so it never steals anybody's typing.
+        if capability == Capability::Keyboard && self.keyboard.is_none() {
+            match self.seat_state.get_keyboard(qh, &seat, None) {
+                Ok(k) => self.keyboard = Some(k),
+                Err(e) => eprintln!("keyboard: {e}"),
+            }
+        }
     }
 
     fn remove_capability(
@@ -640,9 +737,83 @@ impl SeatHandler for App {
                 p.release();
             }
         }
+        if capability == Capability::Keyboard {
+            self.close_box();
+            if let Some(k) = self.keyboard.take() {
+                k.release();
+            }
+        }
     }
 
     fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+}
+
+impl KeyboardHandler for App {
+    fn enter(
+        &mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard,
+        _: &wl_surface::WlSurface, _: u32, _: &[u32], _: &[Keysym],
+    ) {
+    }
+
+    /// Focus moved elsewhere — the person clicked another window, or the compositor took it away.
+    /// That closes the box, which is how clicking away works without owning the whole screen.
+    fn leave(
+        &mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard,
+        _: &wl_surface::WlSurface, _: u32,
+    ) {
+        self.close_box();
+    }
+
+    fn press_key(
+        &mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32,
+        event: KeyEvent,
+    ) {
+        if self.typing.is_none() {
+            return;
+        }
+        match event.keysym {
+            Keysym::Escape => return self.close_box(),
+            Keysym::Return | Keysym::KP_Enter => return self.send_typed(),
+            _ => {}
+        }
+        let Some(typing) = self.typing.as_mut() else { return };
+        typing.last_key = Instant::now();
+        match event.keysym {
+            Keysym::BackSpace => {
+                typing.text.pop();
+            }
+            _ => {
+                // The compositor already applied the layout and the modifiers; anything that is
+                // not printable is not a character somebody meant to type.
+                let typed = event.utf8.unwrap_or_default();
+                if typed.chars().any(char::is_control) || typing.text.chars().count() >= TYPING_CAP
+                {
+                    return;
+                }
+                typing.text.push_str(&typed);
+            }
+        }
+    }
+
+    fn release_key(
+        &mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32,
+        _: KeyEvent,
+    ) {
+    }
+
+    fn repeat_key(
+        &mut self, conn: &Connection, qh: &QueueHandle<Self>, kb: &wl_keyboard::WlKeyboard,
+        serial: u32, event: KeyEvent,
+    ) {
+        self.press_key(conn, qh, kb, serial, event);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn update_modifiers(
+        &mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32,
+        _: Modifiers, _: RawModifiers, _: u32,
+    ) {
+    }
 }
 
 impl PointerHandler for App {
@@ -663,13 +834,21 @@ impl PointerHandler for App {
                     // everyone. Asking each avatar keeps the silhouette authoritative.
                     if let Some(i) = self.at_point(px, py) {
                         self.held = Some(i);
+                        self.pressed_at = Some([px, py]);
                         self.guys[i].body.grab();
                     }
                 }
                 PointerEventKind::Release { .. } => {
+                    let from = self.pressed_at.take();
                     if let Some(i) = self.held.take() {
                         self.guys[i].body.release();
-                        println!("clicked {} — this is where the message box opens", self.guys[i].name);
+                        // A click opens the box; a drag was somebody moving him about.
+                        let moved = from
+                            .map(|a| (a[0] - px).hypot(a[1] - py))
+                            .unwrap_or(f32::INFINITY);
+                        if moved < 6.0 {
+                            self.open_box(i);
+                        }
                     }
                 }
                 _ => {}

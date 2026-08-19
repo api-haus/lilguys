@@ -1,7 +1,7 @@
 # Talking to him
 
-**Status:** the message path is built — `lilguy say "…"` reaches them at once, and `--to` decides
-who was addressed. What is left is the box: clicking him still prints a line to stdout.
+**Status:** built. Click him and a box opens where his thoughts appear; type, press Enter, and the
+message reaches him at once. `lilguy say "…"` does the same thing without a pointer.
 
 Click the guy, type something, he answers. The obvious feature, with one genuinely interesting
 decision inside it.
@@ -29,15 +29,21 @@ A layer surface has `keyboard-interactivity: none`, which is why he never steals
 keyboard focus means asking for `on_demand` while a box is open and giving it back after — a real
 protocol dance with a real failure mode, which is that a bug leaves your keyboard captured.
 
-Three routes, cheapest first:
+Three routes were on the table, cheapest first. It went with 2, and 3 first as the design said:
 
 1. **Borrow an existing prompt.** `fuzzel --dmenu`, `wofi --dmenu`, `rofi -dmenu`: spawn it, read a
    line from stdout, done. No keyboard handling in lilguys at all, no way to trap input, and it
    inherits whatever the user already themes. Ugly in that it is not *his* box, and it needs one of
    them installed.
-2. **Own the input, carefully.** `KeyboardInteractivity::OnDemand` on a second, small layer surface
-   that exists only while the box is open, destroyed on Escape, on send, and on focus loss. A
-   watchdog that tears it down after inactivity. This is the version that looks right.
+2. **Own the input, carefully.** Keyboard interactivity on the surface only while the box is open,
+   given back on Escape, on send, on focus loss and on a watchdog. This is the version that looks
+   right, and it is the one that shipped — on the surface that already exists rather than a second
+   one, because a second layer surface means a second wgpu context to draw one bubble in.
+
+   **Exclusive, not on-demand.** On-demand focus is granted by a click, and the click that opens
+   the box has already been delivered by the time the request reaches the compositor — so it would
+   take a second click before a key arrived. Exclusive is what every dmenu-style launcher on
+   Wayland asks for, and the ways out are Escape, Enter, losing focus, and 45 seconds of nothing.
 3. **Take it from the inbox.** `lilguy say "…"` writes to the socket that already exists. Not a UI,
    but it is a one-line implementation and makes every other route testable before it is built.
 
@@ -71,8 +77,9 @@ talking *to* him rather than opening a dialog.
    addressee. The rest of the room hears it at their own pace, which is right.
 3. ~~Prompt: one line in `awareness` saying they can type at you and that an answer is optional.~~
    Done.
-4. Input surface (route 2), reusing the bubble renderer.
-5. Click on him opens it; Escape and click-away close it.
+4. ~~Input surface (route 2), reusing the bubble renderer.~~ Done, on the existing surface.
+5. ~~Click on him opens it; Escape closes it.~~ Done. A drag opens nothing — that was somebody
+   moving him about, and telling the two apart is six pixels of pointer travel.
 
 ## Open questions
 

@@ -1,23 +1,49 @@
 # QA — graybox
 
-Five checks, about three minutes. Run `./target/release/lilguysd` in a terminal you can see; every
-check reads either the on-screen HUD or that terminal's stdout.
+A short pass over the things only a person at the keyboard can see, about four minutes. Run
+`./target/release/lilguysd` in a terminal you can see; every check reads either the on-screen HUD
+or that terminal's stdout.
 
-Stop it with `Ctrl-C`, or `pkill -x lilguysd`.
+Stop it with `Ctrl-C`, or `./target/release/lilguy stop`.
 
 ## 1. Click-through — 20 seconds
 
 Click somewhere on your desktop that is **not** the character. The click must land on whatever is
 underneath, exactly as if lilguysd were not running.
 
-Then click the character. The terminal prints `clicked — this is where the hermes channel opens`.
-
 Run with `LILGUYS_DEBUG_INPUT=1` to see the input rectangle printed as it moves. It should track
 the character and stay about 125 × 250 px.
 
-**Fails if:** a click away from him is swallowed, or clicking him does nothing.
+**Fails if:** a click away from him is swallowed.
 
-## 2. Gaze direction across a facing flip — 40 seconds
+## 2. The message box — 60 seconds
+
+**This one takes your keyboard while it is open, so read the way out first: `Escape` closes it,
+`Enter` sends, and it closes itself after 45 seconds of nothing.** Your compositor's own key
+bindings keep working throughout, so a stuck box is never a stuck session.
+
+1. Click the character once. A bubble opens above his head, where his thoughts appear, with a
+   caret in it. He should look at you: `you feel being spoken to` in the terminal.
+2. Type. The text appears in the bubble as you go.
+3. Press `Escape`. The bubble goes, and your typing lands in whatever you were using before.
+4. Click him again, type "what are you looking at?", press `Enter`.
+
+The terminal shows the message reaching him within a second or two, not at the next quantum:
+
+```
+[!] lil · they said to you — "what are you looking at?"
+```
+
+His slice closes at once — `[3s elapsed …]` in `turns.jsonl` rather than `[45s elapsed …]` — and
+he may answer or may not. A look is an answer.
+
+Drag him instead of clicking: press, move him across the screen, release. **No box opens**, because
+that was somebody moving him about.
+
+**Fails if:** the box opens but swallows nothing; the box opens on a drag; `Escape` leaves the
+keyboard captured; or the message waits for the quantum.
+
+## 3. Gaze direction across a facing flip — 40 seconds
 
 Move the pointer slowly from the far left of the screen to the far right, passing above him.
 
@@ -30,7 +56,7 @@ right half, and crosses zero once — never twice.
 
 **Fails if:** the pupils or the ray jump to the opposite side when he flips.
 
-## 3. Restraint — 60 seconds
+## 4. Restraint — 60 seconds
 
 Alt-tab between two windows six or seven times. The terminal shows:
 
@@ -43,7 +69,7 @@ The HUD's `gate` line should show `ignored` climbing much faster than `pending`.
 
 **Fails if:** every alt-tab produces a `~`, or anything produces a `*` this early.
 
-## 4. Media sense — 30 seconds
+## 5. Media sense — 30 seconds
 
 Start a YouTube video, or change track in any MPRIS player. Within a second or two:
 
@@ -70,7 +96,7 @@ gdbus emit --session --object-path /org/mpris/MediaPlayer2 \
 --dest org.mpris.MediaPlayer2.<player>` should show traffic. A player that reports `Playing` at
 position `0.000003` and emits nothing is a stale registration, not a sensor bug.
 
-## 5. Cost — 15 seconds
+## 6. Cost — 15 seconds
 
 ```bash
 PID=$(pgrep -x lilguysd)
