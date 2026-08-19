@@ -45,7 +45,8 @@ sent, raw reply, intents parsed, calls rejected and why. `events.jsonl` records 
 [docs/qa-graybox.md](docs/qa-graybox.md).
 
 Run the daemon detached (`setsid nohup … &`) — a timeout on the launching shell kills the whole
-process group otherwise.
+process group otherwise. `pkill -x lilguysd` stops it. For a real always-on install see
+`packaging/lilguys.service` and the README.
 
 ## Where things live
 

@@ -3,12 +3,36 @@
 An always-on desktop buddy for Hyprland. He watches, remembers, and reacts — sparingly.
 He is the topmost surface of a [hermes](https://github.com/) agent that also answers on Telegram.
 
+## Running it
+
+In the foreground, which is the normal loop — `Ctrl-C` stops it:
+
 ```bash
-cargo build --release
-./target/release/lilguysd --print-config > ~/.config/lilguys/lilguys.toml   # optional
-./target/release/lilguysd --check                                          # validates and probes
-./target/release/lilguysd --print-prompt                                   # the assembled prompt
-./target/release/lilguysd
+cargo run --release
+cargo run --release -- --check          # validate config, probe the model, find the voice binary
+cargo run --release -- --print-config   # every setting with its default
+cargo run --release -- --print-prompt   # the assembled system prompt, verbatim
+```
+
+Always on, which is the point of it:
+
+```bash
+cargo install --path .
+install -Dm644 packaging/lilguys.service ~/.config/systemd/user/lilguys.service
+systemctl --user daemon-reload
+systemctl --user enable --now lilguys
+journalctl --user -u lilguys -f
+```
+
+The unit is `PartOf=graphical-session.target`, so it comes and goes with your session. On Hyprland
+that target needs the compositor's environment imported — `uwsm` does it, and without it add
+`systemctl --user import-environment WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE` to your config.
+
+Detached without systemd, which survives the shell that started it:
+
+```bash
+setsid nohup ./target/release/lilguysd >/tmp/lilguys.log 2>&1 </dev/null &
+pkill -x lilguysd    # stop it
 ```
 
 The model must support **native tool calls**; lilguys does not parse calls out of message text.

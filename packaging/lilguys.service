@@ -1,0 +1,23 @@
+# Install:  cargo install --path . && install -Dm644 packaging/lilguys.service ~/.config/systemd/user/lilguys.service
+# Start:    systemctl --user daemon-reload && systemctl --user enable --now lilguys
+# Logs:     journalctl --user -u lilguys -f
+
+[Unit]
+Description=lilguys — a desktop buddy
+Documentation=https://github.com/api-haus/lilguys
+# The surface dies with the session, so the unit must too.
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.cargo/bin/lilguysd
+# A missing model or a missing voice is not a reason to give up on the character.
+Restart=on-failure
+RestartSec=3s
+# The buddy is a spectator; it should lose a scheduling contest with whatever the user is doing.
+Nice=5
+Slice=session.slice
+
+[Install]
+WantedBy=graphical-session.target
