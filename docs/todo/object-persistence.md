@@ -60,9 +60,14 @@ spends it, which is the same shape as every other decision in this design.
 across a conversation is what it gets. The compaction pass already summarises what falls out. There
 is no work to do here beyond keeping the window well-fed and honestly compacted.
 
-**Long-term memory is a product question, not an architecture one.** It should emerge from working
-on interactivity — from finding out what he actually needs to remember to be good company — rather
-than from deciding up front that a vector store is required. The reactor's private notes are the
-seed: they already exist, they are already his own words, and nothing yet reads them back.
+**Long-term memory is the question of what gets woven into the sutra.** Not a store bolted to the
+side — the thread already persists, and it is already the only thing that does. Something learned
+lives in attention until it is either forgotten at the next compaction or promoted into what the
+character *is*. That promotion is the whole design problem; the destination is not in doubt. See
+[philosophy.md](../philosophy.md) §"The sutra".
+
+It should still emerge from working on interactivity — from finding out what a character actually
+needs to remember to be good company — rather than from deciding up front. The reactor's private
+notes are the seed: already his own words, and nothing yet reads them back.
 
 Deferred on purpose. Revisit when a specific, felt absence names itself.

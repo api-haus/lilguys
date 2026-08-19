@@ -148,21 +148,58 @@ These follow from the split. A change that breaks one of them is wrong even if i
    Discarding an observation is correct. The gate exists to make silence cheap, and every addition
    must make silence more likely, not less.
 
-## The prompt is layered for the same reason
+## The sutra: what persists
 
-The system prompt is not one document. It is four, sent in order, each answering a different
-question:
+*Sūtra* means thread — the same root as suture. Not a foundational text that happens to sit at the
+top of a prompt, but the line running through everything, the thing a teaching is strung on. That
+is the right name for these layers, and it is right for a reason worth stating.
+
+**Almost nothing about a lilguy persists.**
+
+| | lives for | lost to |
+|---|---|---|
+| the tick | 16 ms | the next frame |
+| the body's state | a session | any restart |
+| the context window | minutes to hours | compaction, and every restart |
+| **the sutra** | **as long as the character exists** | **nothing** |
+
+The context window is not memory, it is short-term attention, and it is designed to be thrown away
+— compaction summarises it, restarts lose it, a model swap discards it entirely. The body forgets
+completely on every restart. What makes this character *the same character* tomorrow is the thread,
+and only the thread.
+
+That is why swapping the model changes nothing about who someone is, why restarting the soul is
+cheap, and why a plugin ships a sutra rather than a saved state: **the thread is the identity, and
+everything else is weather.**
+
+### Four strands
+
+The sutra is not one document. It is four, sent in order, each answering a different question:
 
 1. **rules** — what may never be done. Absolute, and shortest.
 2. **awareness** — where he is and what is going on. Situational fact, not instruction.
 3. **self** — what kind of thing he is: that his body acts without him, that he learns his own
    actions by reading about them afterwards.
-4. **persona** — who he is. The only layer worth rewriting to make a different creature.
+4. **persona** — who he is. The only strand worth rewriting to make a different creature.
 
-The layering is the same principle as the mind/body split: separable concerns must be separately
-replaceable. Someone writing a new personality must not be able to delete, by accident, the rule
-that keeps system text out of his mouth. A layer is a file or a block of text; the order is a list
-in the config.
+Separable concerns must be separately replaceable, exactly as with the mind and the body. Someone
+writing a new personality must not be able to delete, by accident, the rule that keeps system text
+out of his mouth. A strand is a file or a block of text; the order is a list in the config.
+
+**A strand must be constant.** The engine may weave situational facts into it — who else is here,
+what a body can do — but only facts that hold for the life of the process. Anything that changes
+belongs in the event stream. A thread that moves is not a thread.
+
+### Where memory will go
+
+This also names the deferred question properly. Long-term memory is not a database bolted to the
+side; it is **the question of what gets promoted out of the context window and woven into the
+thread**.
+
+Something a character learns lives in attention until it is either forgotten at the next compaction
+or made part of what they are. That promotion is the whole design problem, and it is a good problem
+precisely because the destination already exists and already persists. Nothing new has to be
+invented to hold it — only the judgement of what deserves to be held.
 
 ## Why the pace is the point
 

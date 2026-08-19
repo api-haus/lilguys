@@ -29,10 +29,11 @@ ordinary observations.
 3. **Never let system text reach a person.** `speak` and `think` are vetted in
    `mind/capability.rs::vet_leakage`. Adding a path from prompt or schema text to the voice or a
    bubble is a defect, not a feature.
-4. **Situational facts are constant, or they do not belong in the prompt.** The engine fills
-   `{name}`, `{others}`, `{capabilities}` and friends into the sutras; a line whose placeholder is
-   empty is dropped whole. Anything that *changes* goes in the event stream — a moving system prompt
-   cannot be cached.
+4. **The sutra is the only thing that persists, so it must not move.** The prompt is a thread, not
+   a document — the body forgets on restart and the context window is compacted away, and the thread
+   is what makes this the same character tomorrow. The engine weaves in `{name}`, `{others}`,
+   `{capabilities}` and friends, and a line whose placeholder is empty is dropped whole. Anything
+   that *changes* goes in the event stream instead: a thread that moves is not a thread.
 5. **Config names nothing internal.** `lilguys.default.toml` is the whole surface and describes
    behaviour, not types. Every field must be present with its default — `Config::default()` parses
    that file, so a missing field is a startup failure.

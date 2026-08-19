@@ -426,12 +426,17 @@ onto the bundled defaults, so it need only contain what differs.
 - `lilguysd --check` validates it, resolves the provider, probes the model for **native tool-call
   support**, and reports whether the TTS binary is on `PATH` — all without opening a surface.
 
-### 12.1 Prompt layers
+### 12.1 The sutra
 
-The system prompt is assembled from named layers in the order `[prompt] layers` lists them. Each is
+The system prompt is a **sutra** — a thread, in the literal sense of the word. It is the only part
+of a character that persists: the body forgets on every restart, the context window is compacted and
+discarded, but the thread is what makes this the same creature tomorrow. See
+[philosophy.md](philosophy.md).
+
+It is assembled from named strands in the order `[prompt] layers` lists them. Each is
 `text = """…"""` or `file = "…"`, and `{name}` becomes the buddy's name anywhere in any of them.
 
-| layer | answers |
+| strand | answers |
 |---|---|
 | `rules` | what may never be done — no system text in its mouth, no repeating the report back |
 | `awareness` | where it is: a desktop, a person working, no question asked, no task |
@@ -463,8 +468,8 @@ One rule, no conditionals, no template language.
 facts; what you are looking at is not. Anything that changes belongs in the event stream, because a
 system prompt that moves is a system prompt that cannot be cached.
 
-`lilguysd --print-prompt` prints each guy's assembled prompt verbatim, facts filled in; `--check`
-prints the layer names with their lengths. Layering exists so that rewriting a character cannot
+`lilguysd --print-prompt` prints each guy's assembled thread verbatim, facts filled in; `--check`
+prints the strand names with their lengths. Stranding exists so that rewriting a character cannot
 delete a rule.
 
 Providers are interchangeable because every one speaks the OpenAI chat-completions wire format:

@@ -185,9 +185,10 @@ Deliberately, and each for its own reason.
   before building an inventory that undoes the gate.
 - **[three-process-split](todo/three-process-split.md)** — trigger-gated. Build it when identity
   outlives the model, or when somebody wants two minds on one soul.
-- **Long-term memory** — a product question. It should emerge from finding out what a character
-  needs to remember to be good company, not from deciding a vector store is required. The reactor's
-  private notes are the seed and nothing yet reads them back.
+- **Long-term memory** — properly stated, the question of what gets promoted out of the context
+  window and **woven into the sutra**, which is the only thing that already persists. A product
+  question, not a storage one. The reactor's private notes are the seed and nothing yet reads them
+  back.
 
 ## How to read the sizes
 
