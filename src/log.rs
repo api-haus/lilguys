@@ -37,7 +37,8 @@ pub fn init(config: &Logging) -> Option<PathBuf> {
     Some(dir)
 }
 
-fn default_dir() -> PathBuf {
+/// `$XDG_STATE_HOME/lilguys`, where the daemon and the CLI both look.
+pub fn default_dir() -> PathBuf {
     dirs::state_dir()
         .or_else(dirs::data_dir)
         .unwrap_or_else(std::env::temp_dir)

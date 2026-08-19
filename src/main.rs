@@ -1,28 +1,15 @@
 //! lilguysd — an always-on desktop buddy on a wlr-layer-shell overlay.
 
-mod app;
-mod attention;
-mod avatar;
-mod config;
-mod gpu;
-mod guy;
-mod hypr;
-mod locomotion;
-mod log;
-mod mind;
-mod sensors;
-mod voice;
-
 use anyhow::{Context, Result};
-use app::App;
 use calloop::{
     timer::{TimeoutAction, Timer},
     EventLoop,
 };
 use calloop_wayland_source::WaylandSource;
-use config::Config;
-use gpu::painter::Painter;
-use hypr::Hypr;
+use lilguysd::{
+    app::App, config, config::Config, doctor, gpu::painter::Painter, guy, hypr::Hypr, log, mind,
+    sensors, voice, FONT,
+};
 use smithay_client_toolkit::{
     compositor::{CompositorState, Region},
     output::OutputState,
@@ -35,8 +22,6 @@ use smithay_client_toolkit::{
 };
 use std::time::Duration;
 use wayland_client::{globals::registry_queue_init, Connection};
-
-const FONT: &str = "/usr/share/fonts/noto/NotoSansMono-Regular.ttf";
 
 fn main() -> Result<()> {
     match std::env::args().nth(1).as_deref() {
@@ -205,67 +190,16 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Validates the config and the provider without opening a surface, so a broken setup is one
-/// command away from a diagnosis.
+/// The same report `lilguy doctor` prints, so there is one set of checks and one place to fix them.
 fn check() -> Result<()> {
-    let (cfg, from) = Config::load()?;
-    let from2 = from.clone();
-    println!("config     {}", from.map(|p| p.display().to_string()).unwrap_or("(defaults)".into()));
-    println!("buddy      {} · skin {} · {:.0}px", cfg.buddy.name, cfg.buddy.skin, cfg.buddy.size);
-    let dir = from2.as_deref().and_then(|p| p.parent());
-    let layers: Vec<String> =
-        cfg.prompt.outline(dir).iter().map(|(k, n)| format!("{k} {n}")).collect();
-    println!("prompt     {}", layers.join(" · "));
-
-    let provider = cfg.provider()?;
-    println!("provider   {} · {} · {}", cfg.mind.provider, provider.url, provider.model);
-    if cfg.mind.enabled {
-        match mind::probe(&cfg) {
-            Ok(p) if p.native_tools => println!("           reachable · native tool calls · called {}", p.detail),
-            Ok(p) => println!(
-                "           reachable but NO NATIVE TOOL CALLS — {}\n           \
-                 pick a model that supports tool calling; lilguys does not parse calls out of text",
-                p.detail
-            ),
-            Err(e) => println!("           UNREACHABLE: {e:#}"),
+    let report = doctor::run(&mut |c| {
+        println!("{}", c.line());
+        if let (Some(fix), true) = (c.fix.as_ref(), c.status != doctor::Status::Ok) {
+            println!("      \u{2192} {fix}");
         }
-    } else {
-        println!("           [mind] enabled = false");
+    });
+    match report.ok() {
+        true => Ok(()),
+        false => std::process::exit(1),
     }
-
-    match cfg.voice.enabled {
-        false => println!("voice      disabled"),
-        true => match cfg.voice.engines.get(&cfg.voice.engine) {
-            None => println!("voice      MISSING [voice.engines.{}]", cfg.voice.engine),
-            Some(e) if e.synth.is_empty() => {
-                println!("voice      {} has no synth command", cfg.voice.engine)
-            }
-            Some(e) => println!(
-                "voice      {} · {} · {} {}",
-                cfg.voice.engine,
-                cfg.voice.voice,
-                e.synth[0],
-                if which(&e.synth[0]) { "found" } else { "NOT ON PATH" }
-            ),
-        },
-    }
-
-    println!(
-        "senses     windows={} workspaces={} media={} idle={}",
-        cfg.senses.windows, cfg.senses.workspaces, cfg.senses.media, cfg.senses.idle
-    );
-    println!(
-        "quantum    {:?} awake · {:?} away · {} turns/hour",
-        cfg.mind.quantum, cfg.mind.idle_quantum, cfg.mind.turns_per_hour
-    );
-    Ok(())
-}
-
-fn which(bin: &str) -> bool {
-    if bin.contains('/') {
-        return std::path::Path::new(bin).exists();
-    }
-    std::env::var_os("PATH")
-        .map(|p| std::env::split_paths(&p).any(|d| d.join(bin).exists()))
-        .unwrap_or(false)
 }

@@ -247,6 +247,8 @@ impl Reactor {
 pub struct Quantiser {
     events: Vec<String>,
     last_sent: Instant,
+    /// Somebody is waiting for an answer, so this slice closes on the next tick.
+    urgent: bool,
     pub focused: Option<String>,
     pub workspace: Option<String>,
     pub present: bool,
@@ -258,6 +260,7 @@ impl Default for Quantiser {
         Self {
             events: Vec::new(),
             last_sent: Instant::now(),
+            urgent: false,
             focused: None,
             workspace: None,
             present: true,
@@ -275,6 +278,12 @@ impl Quantiser {
         }
     }
 
+    /// Cuts the current slice short. The one legitimate override of the pace: everything else may
+    /// wait forty-five seconds because nothing is waiting on it, and a person who just typed is.
+    pub fn urge(&mut self) {
+        self.urgent = true;
+    }
+
     pub fn pending(&self) -> usize {
         self.events.len()
     }
@@ -288,15 +297,17 @@ impl Quantiser {
     pub fn take(&mut self, config: &MindConfig, now: Instant) -> Option<Quantum> {
         let window = if self.present { config.quantum } else { config.idle_quantum };
         let since = now.duration_since(self.last_sent);
-        if since < window {
+        if since < window && !self.urgent {
             return None;
         }
         let restless = !config.restless_after.is_zero()
             && self.present
             && since >= config.restless_after;
         if self.events.is_empty() && !restless {
+            self.urgent = false;
             return None;
         }
+        self.urgent = false;
         self.last_sent = now;
         Some(Quantum {
             events: std::mem::take(&mut self.events),

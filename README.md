@@ -5,14 +5,20 @@ He is the topmost surface of a [hermes](https://github.com/) agent that also ans
 
 ## Running it
 
-In the foreground, which is the normal loop — `Ctrl-C` stops it:
+`lilguysd` is the daemon and `lilguy` is what you talk to. Everything below is `lilguy`, so
+nobody has to know the daemon has flags:
 
 ```bash
-cargo run --release
-cargo run --release -- --check          # validate config, probe the model, find the voice binary
-cargo run --release -- --print-config   # every setting with its default
-cargo run --release -- --print-prompt   # the assembled system prompt, verbatim
+cargo build --release
+./target/release/lilguy doctor          # every check, one line each, with the fix for what is wrong
+./target/release/lilguy start           # the systemd unit if there is one, a detached process if not
+./target/release/lilguy status          # who is running, who is on screen
+./target/release/lilguy say "hello"     # talk to them; an answer is optional
+./target/release/lilguy stop
 ```
+
+Every command takes `--json`, because in practice the thing setting this up is somebody's coding
+agent rather than somebody's afternoon.
 
 Always on, which is the point of it:
 
@@ -28,15 +34,17 @@ The unit is `PartOf=graphical-session.target`, so it comes and goes with your se
 that target needs the compositor's environment imported — `uwsm` does it, and without it add
 `systemctl --user import-environment WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE` to your config.
 
-Detached without systemd, which survives the shell that started it:
+The daemon's own flags, for when you are working on it:
 
 ```bash
-setsid nohup ./target/release/lilguysd >/tmp/lilguys.log 2>&1 </dev/null &
-pkill -x lilguysd    # stop it
+cargo run --release
+cargo run --release -- --check          # the same report `lilguy doctor` prints
+cargo run --release -- --print-config   # every setting with its default
+cargo run --release -- --print-prompt   # the assembled system prompt, verbatim
 ```
 
 The model must support **native tool calls**; lilguys does not parse calls out of message text.
-`--check` tells you whether yours does before you run anything.
+`lilguy doctor` tells you whether yours does before you run anything.
 
 - [Philosophy](docs/philosophy.md) — the mind/body split, what it forbids, and how to add a drive.
   Design law; read it before changing behaviour.

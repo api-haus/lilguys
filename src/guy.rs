@@ -119,9 +119,12 @@ impl Guy {
             let already_reflexive = matches!(&what, Observation::Feeling(f) if f.reflective);
             if verdict == Verdict::Emote && !already_reflexive {
                 let (emotion, intensity, hold) = crate::app::reflex(&what);
-                self.body.reflex(emotion, intensity, hold, &what.summary());
+                self.body.reflex(emotion, intensity, hold, &what.summary_for(&self.name));
             }
-            self.quantiser.observe(what.summary());
+            if what.addressed_to(&self.name) {
+                self.quantiser.urge();
+            }
+            self.quantiser.observe(what.summary_for(&self.name));
         }
         for e in self.attention.log.iter().take(self.attention.fresh()) {
             lines.push(format!("[{}] {} · {}", e.verdict.tag(), self.name, e.text));

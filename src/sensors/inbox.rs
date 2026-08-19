@@ -1,6 +1,7 @@
-//! The socket a feeding mechanic pushes into. One JSON feeling per line, from any process.
+//! The socket a feeding mechanic pushes into. One JSON line per signal, from any process.
 
 use super::{Feeling, Observation};
+use serde::Deserialize;
 use anyhow::Result;
 use std::io::{BufRead, BufReader};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -42,6 +43,24 @@ pub fn spawn(tx: calloop::channel::Sender<Observation>) -> Result<PathBuf> {
     Ok(out)
 }
 
+/// Two shapes go in this socket: a feeling, which needs a `source` and a `state`, and a message,
+/// which needs `text`. Nothing else is accepted, and a rejection says which fields were missing.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Line {
+    Feeling(Feeling),
+    Told { text: String, #[serde(default)] to: Option<String> },
+}
+
+impl From<Line> for Observation {
+    fn from(line: Line) -> Self {
+        match line {
+            Line::Feeling(f) => Observation::Feeling(f),
+            Line::Told { text, to } => Observation::Told { text, to },
+        }
+    }
+}
+
 /// One connection may send many lines and stay open, or send one and close. Both are fine.
 fn serve(stream: UnixStream, tx: &calloop::channel::Sender<Observation>) -> Result<(), ()> {
     for line in BufReader::new(stream).lines().map_while(Result::ok) {
@@ -49,13 +68,16 @@ fn serve(stream: UnixStream, tx: &calloop::channel::Sender<Observation>) -> Resu
         if line.is_empty() {
             continue;
         }
-        match serde_json::from_str::<Feeling>(line) {
-            Ok(feeling) => {
-                if tx.send(Observation::Feeling(feeling)).is_err() {
+        match serde_json::from_str::<Line>(line) {
+            Ok(parsed) => {
+                if tx.send(parsed.into()).is_err() {
                     return Err(());
                 }
             }
-            Err(e) => crate::log::note("inbox-reject", &format!("{e}: {}", super::clip(line, 120))),
+            Err(_) => crate::log::note(
+                "inbox-reject",
+                &format!("wanted {{source,state}} or {{text}}: {}", super::clip(line, 120)),
+            ),
         }
     }
     Ok(())

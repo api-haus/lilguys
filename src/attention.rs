@@ -160,6 +160,11 @@ impl Attention {
     }
 
     fn judge(&mut self, what: &Observation, now: Instant) -> Verdict {
+        // Somebody typing at him is never noise: not damped, not deduplicated, never dropped. A
+        // person repeating themselves means it twice, which is the opposite of nothing new.
+        if matches!(what, Observation::Told { .. }) {
+            return Verdict::Emote;
+        }
         // A source that talks constantly is damped whatever it says. Without this, one image
         // viewer announcing every file it opens drowns out the entire desktop.
         let source = what.source();
@@ -185,7 +190,7 @@ impl Attention {
             // worth a token on their own.
             // A feeling is the body's own immediate feedback and costs nothing to answer. Budget
             // exists to protect tokens; rationing a free response only makes the body feel dead.
-            Observation::Feeling(_) => Verdict::Emote,
+            Observation::Feeling(_) | Observation::Told { .. } => Verdict::Emote,
             // Ambient changes colour the mood too, but they arrive from outside and can flood, so
             // they are rationed. Either way both ride along in the next slice for the mind.
             Observation::Presence { .. } | Observation::Workspace { .. } => {

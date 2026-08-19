@@ -18,6 +18,9 @@ pub enum Observation {
     /// Something began or changed playing. `url` is the whole point: MPRIS hands over a YouTube
     /// watch id for free, so the transcript never needs a single pixel.
     Media { player: String, title: String, artist: String, url: String, playing: bool },
+    /// The person typed something at them. Everybody in the room hears it; `to` names who it was
+    /// meant for, if anyone.
+    Told { text: String, to: Option<String> },
     /// Interoception — the body reporting on itself rather than on the desktop.
     ///
     /// Everything above is something happening *out there*. This is what it feels like in here:
@@ -94,6 +97,7 @@ impl Observation {
             Observation::Workspace { name } => format!("ws:{name}"),
             Observation::Presence { present } => format!("presence:{present}"),
             Observation::Media { url, title, .. } => format!("media:{url}:{title}"),
+            Observation::Told { text, .. } => format!("told:{text}"),
             Observation::Feeling(f) => format!("feeling:{}:{}", f.source, f.state),
         }
     }
@@ -107,6 +111,7 @@ impl Observation {
             Observation::Workspace { .. } => "workspace".into(),
             Observation::Presence { .. } => "presence".into(),
             Observation::Media { player, .. } => format!("media:{player}"),
+            Observation::Told { .. } => "told".into(),
             Observation::Feeling(f) => format!("feeling:{}", f.source),
         }
     }
@@ -126,6 +131,8 @@ impl Observation {
                 clip(artist, 16),
                 clip(title, 26)
             ),
+            Observation::Told { text, to: None } => format!("they said — \"{text}\""),
+            Observation::Told { text, to: Some(who) } => format!("they said to {who} — \"{text}\""),
             Observation::Feeling(f) if f.reflective => {
                 // The cause is the line immediately above this one, so name it, do not restate it.
                 let at = f.detail.trim_start_matches("you feel ").trim_start_matches("you found ");
@@ -140,6 +147,27 @@ impl Observation {
             Observation::Feeling(f) => {
                 format!("you feel {} ({}) — {}", f.state, f.source, clip(&f.detail, 40))
             }
+        }
+    }
+}
+
+impl Observation {
+    /// The same event as one particular creature hears it. Being addressed is not overhearing.
+    pub fn summary_for(&self, me: &str) -> String {
+        match self {
+            Observation::Told { text, to: Some(who) } if who.eq_ignore_ascii_case(me) => {
+                format!("they said to you — \"{text}\"")
+            }
+            other => other.summary(),
+        }
+    }
+
+    /// Whether this was meant for me. An unaddressed message is meant for whoever answers.
+    pub fn addressed_to(&self, me: &str) -> bool {
+        match self {
+            Observation::Told { to: None, .. } => true,
+            Observation::Told { to: Some(who), .. } => who.eq_ignore_ascii_case(me),
+            _ => false,
         }
     }
 }

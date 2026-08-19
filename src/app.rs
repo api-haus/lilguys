@@ -1,18 +1,17 @@
 //! The layer surface, the tick, and the input region that decides what passes through.
 
-use crate::attention::{Attention, Verdict};
-use crate::avatar::{graybox::Graybox, Avatar, Drive, Emotion, Param, Pose};
+use crate::attention::Verdict;
+use crate::avatar::{graybox::Graybox, Emotion};
 use crate::config::Config;
-use crate::guy::Guy;
-use crate::mind::capability::{FocusTarget, Intent};
-use crate::mind::{Quantiser, Reaction, ToMind};
 use crate::gpu::painter::{rgba, Painter};
 use crate::gpu::Gpu;
+use crate::guy::Guy;
 use crate::hypr::Hypr;
-use crate::locomotion::{Body, Drift, Target};
+use crate::mind::capability::{FocusTarget, Intent};
+use crate::mind::{Reaction, ToMind};
+use crate::locomotion::Target;
 use crate::sensors::wayland::Sensors;
 use crate::sensors::Observation;
-use crate::voice::Voice;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState, Region},
     delegate_dispatch2, delegate_registry,
@@ -300,6 +299,9 @@ impl App {
             self.guys[i].avatar = avatar;
             self.overhead(i);
         }
+        if self.config.debug.radii {
+            self.radii(cursor);
+        }
         if self.show_hud {
             self.hud(cursor);
         }
@@ -382,6 +384,19 @@ impl App {
                 rgba(232, 236, 245, alpha),
                 line,
             );
+        }
+    }
+
+    /// The awareness numbers in `[motion]`, drawn where they act: what earns a look, what stops
+    /// earning one, and how close he will come.
+    fn radii(&mut self, cursor: [f32; 2]) {
+        let m = self.config.motion.clone();
+        for i in 0..self.guys.len() {
+            let p = self.guys[i].body.pos;
+            ring(&mut self.painter, p[0], p[1], m.notice_radius, rgba(250, 214, 82, 0.35));
+            ring(&mut self.painter, p[0], p[1], m.forget_radius, rgba(150, 158, 176, 0.22));
+            ring(&mut self.painter, p[0], p[1], m.personal_space, rgba(240, 120, 120, 0.30));
+            self.painter.line(p, cursor, 1.0, rgba(250, 214, 82, 0.25));
         }
     }
 
@@ -471,6 +486,8 @@ pub fn reflex(what: &Observation) -> (Emotion, f32, f32) {
             f.intensity.clamp(0.0, 1.0),
             f.hold.clamp(0.5, 120.0),
         ),
+        // Being spoken to shows on the face before anybody works out what to say back.
+        Observation::Told { .. } => (Emotion::Curious, 0.6, 6.0),
         Observation::Presence { present: true } => (Emotion::Pleased, 0.55, 6.0),
         Observation::Presence { present: false } => (Emotion::Sleepy, 0.7, 30.0),
         Observation::Workspace { .. } => (Emotion::Curious, 0.30, 3.0),

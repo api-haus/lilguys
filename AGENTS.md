@@ -50,17 +50,17 @@ ordinary observations.
 ```bash
 cargo build --release
 cargo test --release
-./target/release/lilguysd --check         # config, provider, NATIVE TOOL CALLS, voice binary
+./target/release/lilguy doctor            # every check: config, wayland, NATIVE TOOL CALLS, voice
+./target/release/lilguy start | stop      # the unit if installed, a detached process if not
+./target/release/lilguy say "…"           # a message reaches them at once, not at the next quantum
 ./target/release/lilguysd --print-config  # every setting with its default
 ./target/release/lilguysd --print-prompt  # the assembled system prompt, verbatim
 ```
 
-Run it detached, or a tool-call timeout kills the whole process group:
-
-```bash
-setsid nohup ./target/release/lilguysd > /tmp/lg.log 2>&1 </dev/null & disown
-pkill -x lilguysd
-```
+`lilguy start` puts the daemon in its own process group, so a tool-call timeout cannot take it
+down with the caller; running `./target/release/lilguysd` in the foreground does not, and a
+timeout there kills the whole group. Every subcommand takes `--json`, exits non-zero when
+something is wrong, and is safe to run twice — the caller is usually another program.
 
 For a real always-on install see `packaging/lilguys.service` and the README.
 
@@ -122,6 +122,9 @@ Each cost real time. None are visible from the code.
 
 | path | what |
 |---|---|
+| `src/bin/lilguy.rs` | the command a person or their agent drives; `src/main.rs` is the daemon |
+| `src/doctor.rs` | every check, shared by `lilguy doctor` and `lilguysd --check` |
+| `src/service.rs` | finding, starting and stopping the daemon, with or without systemd |
 | `src/app.rs` | wiring: surface, tick, input region, painting, intent enactment, the reflex map |
 | `src/guy.rs` | one roster member — body, gate, quantiser, mind, voice, cross-perception |
 | `src/locomotion.rs` | the body — steering, idle regiment, its own feelings |
