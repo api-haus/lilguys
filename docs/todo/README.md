@@ -1,5 +1,8 @@
 # Planned work
 
+**Sequenced in [../roadmap.md](../roadmap.md)** — phases by what you can demonstrate at the end of
+each, with sizes. This page is the index of the designs those phases implement.
+
 Nothing here is built. Each page is a design settled far enough to act on, with its open questions
 named rather than hidden. Read [philosophy.md](../philosophy.md) first — it decides the ambiguous
 cases in all of them.
@@ -36,6 +39,7 @@ flowchart TD
 | [character-packages](character-packages.md) | look, voice, drives, entities and interaction, shipped as a directory | after scripting |
 | [agent-integration](agent-integration.md) | be the face of hermes or openclaw; the original reason for all this | after the split and the message path |
 | [object-persistence](object-persistence.md) | whether persistent things need representing at all | open question; may be answered by doing nothing |
+| [taxonomy-and-telemetry](taxonomy-and-telemetry.md) | the vocabulary as a versioned contract, and cost you can attribute | with tiers; before any plugin exists |
 | [model-tiers](model-tiers.md) | name what a call is worth, not what answers it; engine-enforced budgets | soon — it settles the vocabulary plugins are written against |
 | [world-scripting](world-scripting.md) | a thin core; situations, arcs and casts authored in Luau, over one reactive stream API | after tiers and the Luau host |
 | [many-guys](many-guys.md) | a cast rather than a mascot; the roster works, the social layer is thin | now — voices and addressing are the gaps |
