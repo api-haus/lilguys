@@ -115,9 +115,13 @@ neither needs to be.
 
 These follow from the split. A change that breaks one of them is wrong even if it works.
 
-1. **The mind never reads the world directly.** No sensor result is fetched inside a model turn. If
-   the mind needs to know something, the body must have put it in the stream. Otherwise the model
-   becomes the perceiver and the body becomes a puppet.
+1. **The mind never reads a sensor.** Perception is pushed: if the mind is to know something, the
+   body put it in the stream. The mind may not poll the world, or the model becomes the perceiver
+   and the body a puppet.
+
+   **Consequence is not perception.** A capability may answer the character who used it — "the
+   grill is stone cold" — because that is the result of an action they chose, not a look at a world
+   they cannot see. Perception is pushed; consequence is pulled, and only by acting.
 2. **The body never waits for the mind.** Every reflex path must complete without a model. An
    unreachable endpoint costs the buddy its reflections, never its life.
 3. **Intentions are requests, not commands.** `focus` names a place and the body finds its own way
@@ -132,9 +136,14 @@ These follow from the split. A change that breaks one of them is wrong even if i
    which carries *current* state rather than *changed* state — because a feeling that never changes
    is still true, and an event stream alone cannot say so.
 7. **Whatever authors the world may not author a character.** A script, a director, a plugin — any
-   of them may make something *true* for a creature, however forcefully. None of them may make it
-   *say* or *do* anything. Events in, never intents. The moment a script can put words in a mouth,
-   the characters are puppets reading a screenplay and nothing above is worth having.
+   of them may make something *true* for a creature, however forcefully, and may define what a
+   creature is *able* to do. None of them may make it *say* or *do* anything. Events in and verbs
+   offered; never intents. The moment a script can put words in a mouth, the characters are puppets
+   reading a screenplay and nothing above is worth having.
+
+   The line runs between the choice and its consequence. **A world decides what happens when you
+   cook a patty. It does not decide that you cooked one, and it never decides how you feel about
+   how it came out.**
 8. **Silence is the default everywhere.** Calling no tool is correct. Sending no slice is correct.
    Discarding an observation is correct. The gate exists to make silence cheap, and every addition
    must make silence more likely, not less.

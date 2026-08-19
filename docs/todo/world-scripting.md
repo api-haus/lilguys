@@ -83,6 +83,62 @@ nobody planned. Which is the entire reason to run seven language models instead 
 
 The same rule stated as law: **the director authors the world, the characters author themselves.**
 
+## Scripted capabilities
+
+The rule above leaves a hole, and it is the one that makes the whole thing work.
+
+If a script may only inject events, then nothing can respond *mechanically* to what a character
+chose to do. SpongeBob can be told the grill is hot; he cannot cook. The five built-in capabilities
+are all body verbs — face, motion, voice, writing on screen — because the body is the core's. A
+world needs world verbs, and only the world knows what they are.
+
+**So a script may define capabilities, and decide what they do.** That is not a weakening of the
+rule; it is its other half. Defining a verb *expands* what a character may choose. Deciding the
+consequence of a verb they chose is exactly what a world is for.
+
+```lua
+world.capability{
+  name = "cook",
+  description = "Make a Krabby Patty. Takes a moment, and smells wonderful.",
+  parameters = { kind = { type = "string", enum = { "regular", "double", "deluxe" } } },
+  available_to = { "SpongeBob" },        -- Squidward is offered no such thing
+  on_call = function(ctx, who, args)
+    if not ctx.state.grill_hot then
+      return "the grill is stone cold"   -- the tool result, which only the caller sees
+    end
+    ctx.tell(who, { state = "made a patty", detail = args.kind,
+                    tone = "pleased", intensity = 0.9 })
+    ctx.broadcast{ state = "smells a Krabby Patty", intensity = 0.5 }
+    return "it comes out perfect"
+  end,
+}
+```
+
+Three things fall out of this, and each is worth having on its own:
+
+1. **The tool result is how the world answers a character, mid-turn.** Today every tool returns the
+   literal string `ok`, which is a null signal — and a small model with a history of "I did X → ok"
+   simply repeats X forever. A scripted verb returns something that happened, which is both more
+   useful and better conditioning.
+2. **Consequence is authored, reaction is not.** The script decides the patty burned. It does not
+   decide how SpongeBob feels about that. He finds out like he finds out everything else.
+3. **Capabilities are per character.** `available_to` is what makes a cast a cast rather than seven
+   identical creatures in different colours. Squidward being unable to cook is characterisation
+   expressed as a tool schema.
+
+### What the core keeps
+
+- **The five body verbs cannot be redefined or removed.** `react`, `gesture`, `think`, `speak` and
+  `focus` belong to the body, and the body is Rust's. A script adds; it never replaces.
+- **Tool schemas cost tokens on every turn.** A cast with twenty world verbs makes every turn
+  expensive for everyone. `available_to` is the first defence, and a hard cap per character is the
+  second.
+- **A tool result is context.** A hostile package could feed a character text through a return
+  value as easily as through a persona. Same vetting posture as everything else that reaches a
+  model, and the same honest admission that ordering is not enforcement.
+- **`on_call` runs on the model's clock.** It must be interrupted and bounded like every other
+  script entry point, and a verb that blocks is a verb that hangs a turn.
+
 ## What a plugin carries
 
 ```
@@ -124,6 +180,8 @@ structured should not be a `cargo build`.
    policy and belongs on the restartable side. Editing an episode script must not blink the cast
    out of existence.
 4. **`llm.ask(tier, prompt, opts)`** returning nil when refused, with the refusal logged.
+5. **`world.capability{…}`**, with per-character availability, a schema cap, and `on_call` bounded
+   by the same interrupt as everything else.
 
 ## Open questions
 
