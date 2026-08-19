@@ -66,6 +66,8 @@ process group otherwise.
   can restart without the character blinking out. Do this first; the scripting work lands on top.
 - [docs/todo/luau-scripting.md](docs/todo/luau-scripting.md) — sandboxed Luau drives and character
   packages, composing through the observation stream rather than through each other.
+- [docs/todo/three-process-split.md](docs/todo/three-process-split.md) — pulling the mind out of the
+  soul so the part iterated on constantly is the cheapest to discard. Trigger-gated; not soon.
 
 ## Adding things
 

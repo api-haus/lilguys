@@ -7,39 +7,19 @@ change a persona, a provider, or a gate rule tears down the layer surface and th
 of existence. That is wrong twice over: the philosophy says the body outlives the mind, and in
 practice iteration on the soul is where all the work happens.
 
-## Two processes or three
+## Two processes, not three
 
-Three roles are nameable, and they are genuinely different things:
+Three roles are nameable and genuinely different — hologram, soul, mind — and they differ by
+**restart cadence**, which is the test that earns a process boundary. But build two.
 
-| role | holds | restart costs | how often you touch it |
-|---|---|---|---|
-| **hologram** | surface, sensors, reflex arc, locomotion, voice | the character blinks out | never |
-| **soul** | gate, quantiser, buffer, memory, drives, scripts | pending dwells, dedup tables | rarely |
-| **mind** | context window, provider, prompt layers | conversation history | constantly |
-
-The seam that earns a process boundary is the one whose two sides have different **restart
-cadences**, and by that test all three are real. You restart the mind every time you touch a
-persona or swap a model; you restart the soul when you change a gate rule, which is rare; you never
-restart the hologram at all.
-
-**Start with two, and put the seam where three would cut.** The soul and the mind ship in one
-process, talking over an in-process channel that carries the same frames the socket would. Promoting
-that channel to a second socket later is a routing change, not a protocol change, and nothing above
-or below notices.
+**Put the seam where three would cut.** The soul and the mind ship in one process, talking over an
+in-process channel that carries the same frames a socket would. Promoting that channel to a second
+socket later is a routing change, not a protocol change, and nothing above or below notices.
 
 Two now, because a third process buys a shorter iteration loop and costs a second buffer, a second
-handshake, a second failure mode, and a second thing to supervise — and the loop is not the
-bottleneck while the whole thing is still a graybox.
-
-Three later, when one of these becomes true:
-
-- **Identity outlives the model.** Once the soul holds memory, drives and scripts, restarting it
-  means forgetting, and you will want the mind — the part you actually iterate — to be the
-  disposable one.
-- **Several minds.** A cheap local model handling most slices and a large hosted one for the rare
-  interesting slice is two connections to one soul, which the two-process shape cannot express.
-- **The soul outlives the session.** A soul that keeps running while you log out, holding
-  continuity across hologram lifetimes, is a different lifecycle from a mind.
+handshake, a second failure mode and a second unit to supervise — and the loop is not the bottleneck
+while this is a graybox. The case for three, and the triggers that make it worth doing, are in
+[three-process-split.md](three-process-split.md).
 
 ## Buffering
 
