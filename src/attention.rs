@@ -18,6 +18,18 @@ pub struct Rules {
     pub emotes_per_hour: f32,
 }
 
+impl From<&crate::config::Config> for Rules {
+    fn from(c: &crate::config::Config) -> Self {
+        Self {
+            novelty_window: c.senses.novelty_window,
+            focus_dwell: c.senses.focus_dwell,
+            media_dwell: c.senses.media_dwell,
+            thoughts_per_hour: c.mind.turns_per_hour,
+            emotes_per_hour: 90.0,
+        }
+    }
+}
+
 impl Default for Rules {
     fn default() -> Self {
         Self {

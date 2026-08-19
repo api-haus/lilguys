@@ -46,7 +46,7 @@ impl Observation {
     }
 }
 
-fn clip(s: &str, n: usize) -> String {
+pub fn clip(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         return s.to_string();
     }

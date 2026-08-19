@@ -1,6 +1,6 @@
 //! Labelled shapes standing in for a character, so composition and locomotion can be judged before any art exists.
 
-use super::{Avatar, Bounds, Drive, Param, Pose};
+use super::{Avatar, Bounds, Drive, Gesture, Param, Pose};
 use crate::gpu::painter::{rgba, Color, Painter};
 
 const SKIN: Color = rgba(232, 196, 160, 1.0);
@@ -69,27 +69,41 @@ impl Avatar for Graybox {
         let roll = p.get(Param::HeadRoll) * m;
         let gaze = [p.get(Param::GazeX), p.get(Param::GazeY)];
         let breath = p.get(Param::Breath);
-        let step = self.drive.step_phase;
-        let stride = (self.drive.speed / 210.0).clamp(0.0, 1.0);
+        let bob = self.drive.bob_phase;
+        // Limbs trail the direction of travel, so drifting reads as swimming rather than sliding.
+        let drag = (self.drive.speed / 190.0).clamp(0.0, 1.4);
+        let lean = [-self.drive.heading[0] * drag * m, -self.drive.heading[1] * drag];
+        let (gk, gt) = match self.drive.gesture {
+            Some((g, t)) => (Some(g), t),
+            None => (None, 0.0),
+        };
+        // One smooth in-and-out envelope drives every gesture; each maps it to different limbs.
+        let ge = (gt * std::f32::consts::PI).sin();
 
         // Rig-local to surface pixels.
         let to_px = |q: P| -> P { [origin[0] + q[0] * m * scale, origin[1] + q[1] * scale] };
         let px = scale;
 
         let body_yaw = body_yaw_local * 0.10;
-        let hip: P = [body_yaw * 0.4, -0.46 + breath * 0.004];
-        let chest: P = [body_yaw, -0.70 + breath * 0.010];
-        let neck: P = [body_yaw * 1.1, -0.775 + breath * 0.012];
+        let squash = match gk {
+            Some(Gesture::Bounce) => -ge * 0.05,
+            Some(Gesture::Slump) => ge * 0.07,
+            Some(Gesture::Stretch) => -ge * 0.05,
+            _ => 0.0,
+        };
+        let hip: P = [body_yaw * 0.4 + lean[0] * 0.05, -0.46 + breath * 0.004 + squash];
+        let chest: P = [body_yaw + lean[0] * 0.09, -0.70 + breath * 0.010 + squash * 0.6];
+        let neck: P = [body_yaw * 1.1 + lean[0] * 0.11, -0.775 + breath * 0.012 + squash * 0.4];
 
         // ---- legs ----
-        let swing = step.sin() * 0.42 * stride;
-        let lift = (step.cos() * 0.5 + 0.5) * 0.10 * stride;
+        let kick = if gk == Some(Gesture::Bounce) { ge * 0.5 } else { 0.0 };
+        let tuck = if gk == Some(Gesture::Slump) { ge * 0.16 } else { 0.0 };
         for (side, phase) in [(-1.0f32, 0.0f32), (1.0, std::f32::consts::PI)] {
-            let s = (step + phase).sin() * 0.42 * stride;
-            let l = ((step + phase).cos() * 0.5 + 0.5) * 0.10 * stride;
+            let s = (bob * 0.8 + phase).sin() * 0.14 + lean[0] * 0.5 + kick * side;
+            let l = (bob * 0.8 + phase).cos() * 0.05 + lean[1] * 0.4;
             let h = add(hip, [side * 0.075, 0.0]);
-            let knee = add(h, [s * 0.16, 0.24 - l * 0.4]);
-            let foot = add(knee, [s * 0.10, 0.22 - l]);
+            let knee = add(h, [s * 0.16, 0.24 - l * 0.4 - tuck]);
+            let foot = add(knee, [s * 0.10, 0.22 - l - tuck]);
             painter.line(to_px(h), to_px(knee), 0.075 * px, LEG);
             painter.line(to_px(knee), to_px(foot), 0.065 * px, LEG);
             painter.rrect(
@@ -105,7 +119,6 @@ impl Avatar for Graybox {
                 painter.ellipse(to_px(h)[0], to_px(h)[1], 0.030 * px, 0.030 * px, JOINT);
             }
         }
-        let _ = (swing, lift);
 
         // ---- torso ----
         let torso_mid = [(hip[0] + chest[0]) * 0.5, (hip[1] + chest[1]) * 0.5];
@@ -121,10 +134,34 @@ impl Avatar for Graybox {
 
         // ---- arms ----
         for (side, phase) in [(-1.0f32, std::f32::consts::PI), (1.0, 0.0)] {
-            let s = (step + phase).sin() * 0.34 * stride;
+            let lead = side > 0.0;
+            let s = (bob * 0.8 + phase).sin() * 0.16 + lean[0] * 0.7;
             let shoulder = add(chest, [side * 0.115, -0.015]);
-            let elbow = add(shoulder, [s * 0.13 - side * 0.02, 0.155]);
-            let hand = add(elbow, [s * 0.10, 0.145]);
+            // A gesture overrides the drift pose on whichever arm it uses.
+            let (mut elbow, mut hand) = (
+                add(shoulder, [s * 0.13 - side * 0.02, 0.155 + lean[1] * 0.5]),
+                [0.0, 0.0],
+            );
+            hand = add(elbow, [s * 0.10, 0.145 + lean[1] * 0.5]);
+            match gk {
+                Some(Gesture::Wave) if lead => {
+                    elbow = add(shoulder, [side * 0.10, 0.02]);
+                    hand = add(elbow, [side * (0.06 + (gt * 22.0).sin() * 0.09), -0.13]);
+                }
+                Some(Gesture::Point) if lead => {
+                    elbow = add(shoulder, [side * (0.10 + ge * 0.06), 0.06]);
+                    hand = add(elbow, [side * (0.10 + ge * 0.12), 0.02 - ge * 0.04]);
+                }
+                Some(Gesture::Shrug) => {
+                    elbow = add(shoulder, [side * (0.13 + ge * 0.05), 0.10 - ge * 0.06]);
+                    hand = add(elbow, [side * 0.05, 0.10 - ge * 0.05]);
+                }
+                Some(Gesture::Stretch) => {
+                    elbow = add(shoulder, [side * 0.09, 0.04 - ge * 0.14]);
+                    hand = add(elbow, [side * 0.05, 0.04 - ge * 0.16]);
+                }
+                _ => {}
+            }
             painter.line(to_px(shoulder), to_px(elbow), 0.062 * px, ARM);
             painter.line(to_px(elbow), to_px(hand), 0.054 * px, ARM);
             painter.ellipse(to_px(hand)[0], to_px(hand)[1], 0.055 * px, 0.055 * px, ARM);
@@ -135,7 +172,19 @@ impl Avatar for Graybox {
         }
 
         // ---- head ----
-        let head_c = add(neck, [yaw * 0.035, -0.105 + p.get(Param::HeadPitch) * 0.012]);
+        let nod = match gk {
+            Some(Gesture::Nod) => (gt * 14.0).sin() * 0.030,
+            Some(Gesture::Slump) => ge * 0.045,
+            _ => 0.0,
+        };
+        let shake = match gk {
+            Some(Gesture::Shake) => (gt * 15.0).sin() * 0.035,
+            _ => 0.0,
+        };
+        let head_c = add(
+            neck,
+            [yaw * 0.035 + shake * m, -0.105 + p.get(Param::HeadPitch) * 0.012 + nod],
+        );
         let head_c = rot_about(head_c, neck, roll * 0.5);
         painter.line(to_px(neck), to_px(head_c), 0.07 * px, SKIN);
         painter.rrect_rot(
@@ -200,6 +249,10 @@ impl Avatar for Graybox {
         for (label, at) in [("head", head_c), ("chest", chest), ("hip", hip)] {
             let q = to_px(at);
             painter.text(q[0] + 0.16 * px, q[1], 12.0, LABEL, label);
+        }
+        if let Some(g) = gk {
+            let q = to_px(add(head_c, [0.0, -0.30]));
+            painter.text(q[0] - 0.10 * px, q[1], 12.0, GAZE, g.name());
         }
     }
 }

@@ -1,12 +1,16 @@
 //! The layer surface, the tick, and the input region that decides what passes through.
 
-use crate::attention::{Attention, Rules, Verdict};
-use crate::avatar::{graybox::Graybox, Avatar, Drive, Param, Pose};
+use crate::attention::{Attention, Verdict};
+use crate::avatar::{graybox::Graybox, Avatar, Drive, Emotion, Param, Pose};
+use crate::config::Config;
+use crate::mind::capability::{FocusTarget, Intent};
+use crate::mind::{Quantiser, Reaction, ToMind};
 use crate::gpu::painter::{rgba, Painter};
 use crate::gpu::Gpu;
 use crate::hypr::Hypr;
-use crate::locomotion::{Body, Gait, Tuning};
+use crate::locomotion::{Body, Drift, Target};
 use crate::sensors::wayland::Sensors;
+use crate::voice::Voice;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState, Region},
     delegate_dispatch2, delegate_registry,
@@ -22,7 +26,7 @@ use smithay_client_toolkit::{
         WaylandSurface,
     },
 };
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use wayland_client::{
     protocol::{wl_output, wl_pointer, wl_seat, wl_surface},
     Connection, QueueHandle,
@@ -45,8 +49,13 @@ pub struct App {
     pub conn: Connection,
     pub sensors: Sensors,
     pub attention: Attention,
-    /// Decaying impulse from the last thing worth reacting to.
-    reaction: Option<(Instant, Verdict)>,
+    pub config: Config,
+    pub quantiser: Quantiser,
+    pub voice: Voice,
+    to_mind: Option<std::sync::mpsc::Sender<ToMind>>,
+    last_reaction: Option<Reaction>,
+    mind_error: Option<String>,
+    turns: u32,
 
     pub width: u32,
     pub height: u32,
@@ -59,7 +68,7 @@ pub struct App {
 
     avatar: Box<dyn Avatar>,
     pose: Pose,
-    body: Body,
+    pub body: Body,
     last_tick: Instant,
     frame_ms: f32,
     frames: u32,
@@ -81,8 +90,12 @@ impl App {
         hypr: Hypr,
         conn: Connection,
         sensors: Sensors,
+        config: Config,
+        voice: Voice,
+        to_mind: Option<std::sync::mpsc::Sender<ToMind>>,
     ) -> Self {
-        let tuning = Tuning::default();
+        let motion = config.motion.clone();
+        let size = config.buddy.size;
         Self {
             registry_state,
             seat_state,
@@ -94,8 +107,14 @@ impl App {
             hypr,
             conn,
             sensors,
-            attention: Attention::new(Rules::default()),
-            reaction: None,
+            attention: Attention::new((&config).into()),
+            quantiser: Quantiser::default(),
+            voice,
+            to_mind,
+            last_reaction: None,
+            mind_error: None,
+            turns: 0,
+            config,
             width: 0,
             height: 0,
             exit: false,
@@ -105,7 +124,7 @@ impl App {
             press_origin: None,
             avatar: Box::new(Graybox::default()),
             pose: Pose::default(),
-            body: Body::new(tuning, 0.0, 0.0),
+            body: Body::new(motion, size, [1.0, 1.0]),
             last_tick: Instant::now(),
             frame_ms: 0.0,
             frames: 0,
@@ -118,13 +137,11 @@ impl App {
 
     /// Seconds until the next tick. Falls to `IDLE_HZ` when nothing is animating.
     pub fn tick_interval(&self) -> f32 {
-        let reacting = self
-            .reaction
-            .is_some_and(|(at, _)| at.elapsed() < Duration::from_secs(3));
         let busy = self.body.moving()
-            || self.body.gait != Gait::Idle
+            || self.body.drift != Drift::Idle
+            || self.body.gesture().is_some()
+            || self.body.speaking
             || self.hover
-            || reacting
             || self.press_origin.is_some();
         1.0 / if busy { ACTIVE_HZ } else { IDLE_HZ }
     }
@@ -144,14 +161,14 @@ impl App {
             self.body.drag_to(cursor[0], cursor[1]);
         }
         self.body.update(cursor, dt, &mut self.pose);
-        self.body.pos[0] = self.body.pos[0].clamp(60.0, self.width as f32 - 60.0);
 
         let drive = Drive {
-            speed: self.body.vel_x.abs(),
-            step_phase: self.body.step_phase(),
-            airborne: self.body.gait == Gait::Dragged,
+            speed: self.body.speed(),
+            heading: self.body.heading(),
+            bob_phase: self.body.bob_phase(),
+            gesture: self.body.gesture(),
+            speaking: self.body.speaking,
         };
-        self.express(dt);
         self.avatar.advance(&self.pose, &drive, dt);
 
         self.paint(cursor);
@@ -174,45 +191,101 @@ impl App {
         }
     }
 
-    /// Drains the sensor bus through the gate. Only what survives touches the buddy's face.
+    /// Drains the sensor bus through the gate, then buckets what survived for the model.
     fn sense(&mut self, now: Instant) {
         let sensed = self.sensors.bus.drain();
-        if sensed.is_empty() && self.attention.waiting() == 0 {
-            return;
+        if !sensed.is_empty() || self.attention.waiting() > 0 {
+            for (verdict, what) in self.attention.consider(sensed, now) {
+                // A local emote keeps the buddy alive between model turns, which are minutes apart.
+                if verdict == Verdict::Emote {
+                    self.body.feel(Emotion::Curious, 0.35, 4.0);
+                }
+                self.quantiser.observe(what.summary());
+            }
+            for e in self.attention.log.iter().take(self.attention.fresh()) {
+                println!("[{}] {}", e.verdict.tag(), e.text);
+            }
         }
-        for (verdict, what) in self.attention.consider(sensed, now) {
-            self.reaction = Some((now, verdict));
-        }
-        // Grayboxing the gate means seeing what it threw away, not only what it kept.
-        for e in self.attention.log.iter().take(self.attention.fresh()) {
-            println!("[{}] {}", e.verdict.tag(), e.text);
+
+        self.quantiser.present = self.sensors.present;
+        self.quantiser.focused = self.sensors.focused_title();
+        self.quantiser.workspace = self.sensors.workspace_name();
+        if let Some(tx) = self.to_mind.as_ref() {
+            if let Some(q) = self.quantiser.take(&self.config.mind, now) {
+                let _ = tx.send(ToMind::Tick(q));
+            }
         }
     }
 
-    /// A surviving observation reads on the face, never as speech. Speaking is a separate path.
-    fn express(&mut self, dt: f32) {
-        let Some((at, verdict)) = self.reaction else { return };
-        let age = at.elapsed().as_secs_f32();
-        if age > 3.0 {
-            self.reaction = None;
+    /// Enacts what the model decided. Nothing here talks to the model; it only obeys.
+    pub fn enact(&mut self, reaction: Reaction) {
+        self.turns += 1;
+        self.mind_error = reaction.error.clone();
+        for intent in &reaction.intents {
+            println!("[*] {}", intent.summary());
+            match intent {
+                Intent::React { emotion, intensity, hold } => {
+                    self.body.feel(*emotion, *intensity, *hold)
+                }
+                Intent::Gesture { gesture } => self.body.perform(*gesture),
+                Intent::Speak { text } => {
+                    if !self.voice.say(text) {
+                        println!("    (voice unavailable or busy)");
+                    }
+                }
+                Intent::Focus { target, linger } => {
+                    if let Some(t) = self.resolve(target, *linger) {
+                        self.body.go_to(t);
+                    }
+                }
+            }
         }
-        let curve = (1.0 - age / 3.0).clamp(0.0, 1.0);
-        match verdict {
-            Verdict::Think => {
-                self.pose.ease_to(Param::BrowL, 0.4 + curve * 0.5, 6.0, dt);
-                self.pose.ease_to(Param::BrowR, 0.4 + curve * 0.5, 6.0, dt);
-                self.pose.ease_to(Param::MouthOpen, curve * 0.25, 5.0, dt);
+        if let Some(note) = reaction.note.as_deref() {
+            println!("[.] note: {}", crate::sensors::clip(note, 70));
+        }
+        self.last_reaction = Some(reaction);
+    }
+
+    /// Turns a named target into a point. Window geometry is the one thing no Wayland protocol
+    /// exposes, so this is where `hyprctl clients` earns its place.
+    fn resolve(&mut self, target: &FocusTarget, linger: f32) -> Option<Target> {
+        let (w, h) = (self.width as f32, self.height as f32);
+        match target {
+            FocusTarget::Pointer => {
+                let c = self.hypr.cursor_pos().ok()?;
+                let side = if c.0 > w * 0.5 { -1.0 } else { 1.0 };
+                Some(Target {
+                    at: [c.0 + side * self.config.motion.personal_space, c.1],
+                    linger,
+                    label: "the pointer".into(),
+                })
             }
-            Verdict::Emote => {
-                self.pose.ease_to(Param::Surprise, curve * 0.6, 9.0, dt);
-                self.pose.ease_to(Param::HeadPitch, -curve * 0.25, 7.0, dt);
+            FocusTarget::Place { where_ } => {
+                let f = where_.fraction();
+                Some(Target { at: [f[0] * w, f[1] * h], linger, label: format!("{where_:?}") })
             }
-            _ => {}
+            FocusTarget::Away => {
+                let side = if self.body.pos[0] > w * 0.5 { 1.0 } else { -1.0 };
+                Some(Target {
+                    at: [w * 0.5 + side * w * 0.9, self.body.pos[1]],
+                    linger: -1.0,
+                    label: "away".into(),
+                })
+            }
+            FocusTarget::Window { r#match } => {
+                let (rect, name) = self.hypr.window_rect(r#match)?;
+                Some(Target {
+                    // Beside the window's top edge, not on top of what the user is reading.
+                    at: [rect[0] + rect[2] * 0.5, rect[1] + self.config.buddy.size * 0.45],
+                    linger,
+                    label: name,
+                })
+            }
         }
     }
 
     fn scale(&self) -> f32 {
-        self.body.tuning.height
+        self.config.buddy.size
     }
 
     fn paint(&mut self, cursor: [f32; 2]) {
@@ -229,13 +302,13 @@ impl App {
     }
 
     fn hud(&mut self, cursor: [f32; 2], origin: [f32; 2]) {
-        let t = self.body.tuning.clone();
+        let t = self.config.motion.clone();
         let ink = rgba(255, 255, 255, 0.85);
         let dim = rgba(160, 170, 190, 0.75);
         let hot = rgba(250, 214, 82, 0.95);
 
         // Awareness radii, so a tuning change is visible instead of felt.
-        let eye_y = origin[1] - t.height * 0.78;
+        let eye_y = origin[1] - self.config.buddy.size * 0.28;
         for (r, c) in [
             (t.personal_space, rgba(226, 86, 90, 0.30)),
             (t.notice_radius, rgba(104, 168, 128, 0.22)),
@@ -245,10 +318,9 @@ impl App {
         }
         self.painter.line([origin[0], eye_y], cursor, 1.0, rgba(250, 214, 82, 0.35));
 
-        let (x, mut y) = (origin[0] + 150.0, origin[1] - t.height * 1.05);
+        let (x, mut y) = (origin[0] + 150.0, origin[1] - self.config.buddy.size * 0.95);
         let line_h = 15.0;
-        let gait = self.body.gait.name();
-        let head = format!("{}  ·  {}", self.avatar.name(), gait);
+        let head = format!("{}  ·  {}", self.avatar.name(), self.body.drift.name());
         self.painter.rrect(x + 96.0, y + 96.0, 210.0, 250.0, 8.0, rgba(12, 14, 20, 0.72));
         self.painter.text(x, y, 14.0, hot, &head);
         y += line_h + 4.0;
@@ -258,7 +330,7 @@ impl App {
             format!("frame    {:>6.2} ms", self.frame_ms),
             format!("tick     {:>6.0} hz", 1.0 / self.tick_interval()),
             format!("cursor   {:>6.0} px", self.body.cursor_dist),
-            format!("vel      {:>6.0} px/s", self.body.vel_x),
+            format!("vel      {:>6.0} px/s", self.body.speed()),
             format!("quads    {:>6}", self.painter.quads.len()),
         ] {
             self.painter.text(x, y, 12.0, dim, &row);
@@ -307,6 +379,12 @@ impl App {
             format!("acted    {emote} emote  {think} think"),
             format!("waiting  {}", self.attention.waiting()),
             format!("credit   {:.2} thoughts", self.attention.thought_credit()),
+            format!("quantum  {} queued  {:.0}s", self.quantiser.pending(), self.quantiser.since_last().as_secs_f32()),
+            format!("mind     {} turns  {} tok", self.turns, self.last_reaction.as_ref().map(|r| r.tokens).unwrap_or(0)),
+            match self.mind_error.as_deref() {
+                Some(e) => format!("error    {}", crate::sensors::clip(e, 30)),
+                None => format!("voice    {}", if self.voice.available() { "ready" } else { "off" }),
+            },
         ] {
             self.painter.text(x, y, 12.0, dim, &row);
             y += 15.0;
@@ -418,14 +496,17 @@ impl LayerShellHandler for App {
         self.height = h;
 
         match self.gpu.as_mut() {
-            Some(gpu) => gpu.resize(w, h),
+            Some(gpu) => {
+                gpu.resize(w, h);
+                self.body.bounds = [w as f32, h as f32];
+            }
             None => match Gpu::new(conn, self.layer.wl_surface(), w, h) {
                 Ok(gpu) => {
                     self.gpu = Some(gpu);
                     self.body = Body::new(
-                        self.body.tuning.clone(),
-                        h as f32 - 8.0,
-                        w as f32 * 0.5,
+                        self.config.motion.clone(),
+                        self.config.buddy.size,
+                        [w as f32, h as f32],
                     );
                 }
                 Err(e) => {

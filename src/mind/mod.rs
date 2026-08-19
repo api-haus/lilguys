@@ -1,0 +1,317 @@
+//! The reactor. Sensed events are quantised into buckets, one bucket is at most one model turn.
+
+pub mod capability;
+pub mod provider;
+
+use crate::config::{Config, Mind as MindConfig};
+use anyhow::Result;
+use capability::Intent;
+use provider::{Client, Message};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
+
+/// One bucket of the quantised stream: everything that happened in a quantum, already deduplicated
+/// by the local gate, plus the state that frames it.
+#[derive(Clone, Debug)]
+pub struct Quantum {
+    pub events: Vec<String>,
+    pub focused: Option<String>,
+    pub workspace: Option<String>,
+    pub present: bool,
+    pub since_last: Duration,
+}
+
+impl Quantum {
+    fn render(&self) -> String {
+        let mut out = String::new();
+        out.push_str(&format!(
+            "[{}s elapsed · user {} · workspace {} · focused {}]\n",
+            self.since_last.as_secs(),
+            if self.present { "here" } else { "away" },
+            self.workspace.as_deref().unwrap_or("?"),
+            self.focused.as_deref().unwrap_or("nothing"),
+        ));
+        for e in &self.events {
+            out.push_str("- ");
+            out.push_str(e);
+            out.push('\n');
+        }
+        if self.events.is_empty() {
+            out.push_str("- nothing new\n");
+        }
+        out
+    }
+}
+
+/// What came back from a turn, for the caller to enact and to show.
+#[derive(Clone, Debug)]
+pub struct Reaction {
+    pub intents: Vec<Intent>,
+    pub note: Option<String>,
+    pub tokens: usize,
+    pub compacted: bool,
+    pub error: Option<String>,
+}
+
+pub enum ToMind {
+    Tick(Quantum),
+    Stop,
+}
+
+/// Runs the model loop on its own thread. Blocking HTTP never touches the render loop.
+pub fn spawn(
+    config: &Config,
+    persona: String,
+    out: calloop::channel::Sender<Reaction>,
+) -> Result<mpsc::Sender<ToMind>> {
+    let client = Client::new(config.provider()?.clone())?;
+    let mind = config.mind.clone();
+    let name = config.buddy.name.clone();
+    let (tx, rx) = mpsc::channel();
+
+    std::thread::Builder::new()
+        .name("mind".into())
+        .spawn(move || {
+            let mut reactor = Reactor::new(client, mind, system_prompt(&name, &persona));
+            while let Ok(msg) = rx.recv() {
+                let ToMind::Tick(q) = msg else { return };
+                let reaction = reactor.turn(q);
+                if out.send(reaction).is_err() {
+                    return;
+                }
+            }
+        })
+        .map(|_| tx)
+        .map_err(Into::into)
+}
+
+fn system_prompt(name: &str, persona: &str) -> String {
+    format!(
+        "Your name is {name}.\n\n{persona}\n\n\
+         You receive a short report every so often describing what changed on the desktop. You do \
+         not receive every event — a filter has already discarded the repetitive ones, so what \
+         reaches you is what is new.\n\n\
+         Respond by calling tools. Doing nothing is a valid and common response: call no tools at \
+         all when nothing warrants one. Prefer `react` over `gesture`, and `gesture` over `speak`. \
+         Never call `speak` twice in a row. Never describe the report back to the user.\n\n\
+         Any text you write outside a tool call is a private note to yourself, kept in your own \
+         memory and never shown or spoken. Use it sparingly to record something you want to \
+         remember."
+    )
+}
+
+struct Reactor {
+    client: Client,
+    config: MindConfig,
+    system: String,
+    history: Vec<Message>,
+    budget: f32,
+    budget_at: Instant,
+}
+
+impl Reactor {
+    fn new(client: Client, config: MindConfig, system: String) -> Self {
+        Self {
+            client,
+            budget: config.turns_per_hour * 0.25,
+            budget_at: Instant::now(),
+            config,
+            system,
+            history: Vec::new(),
+        }
+    }
+
+    fn afford(&mut self) -> bool {
+        let now = Instant::now();
+        let dt = now.duration_since(self.budget_at).as_secs_f32();
+        self.budget_at = now;
+        let ceiling = (self.config.turns_per_hour * 0.25).max(1.0);
+        self.budget = (self.budget + dt * self.config.turns_per_hour / 3600.0).min(ceiling);
+        if self.budget < 1.0 {
+            return false;
+        }
+        self.budget -= 1.0;
+        true
+    }
+
+    fn turn(&mut self, q: Quantum) -> Reaction {
+        let mut reaction = Reaction {
+            intents: Vec::new(),
+            note: None,
+            tokens: self.tokens(),
+            compacted: false,
+            error: None,
+        };
+        if !q.present && !self.config.think_while_away {
+            return reaction;
+        }
+        if !self.afford() {
+            reaction.error = Some("over budget".into());
+            return reaction;
+        }
+
+        reaction.compacted = self.compact_if_needed();
+        self.history.push(Message::user(q.render()));
+
+        let reply = match self.client.chat(&self.messages(), &capability::schemas()) {
+            Ok(m) => m,
+            Err(e) => {
+                // Drop the prompt again so a dead endpoint cannot inflate the window forever.
+                self.history.pop();
+                reaction.error = Some(format!("{e:#}"));
+                return reaction;
+            }
+        };
+
+        for call in reply.tool_calls.iter().flatten() {
+            if let Some(intent) = capability::parse(&call.function.name, &call.function.arguments) {
+                reaction.intents.push(intent);
+            }
+        }
+        let text = reply.content.clone().unwrap_or_default();
+        // Models leave stray braces and whitespace beside their tool calls; that is not a note.
+        let noteworthy = text.chars().filter(|c| c.is_alphanumeric()).count() >= 4;
+        reaction.note = noteworthy.then(|| text.clone());
+        // A model that writes calls as prose is misconfigured, not something to parse around.
+        if reply.tool_calls.is_none() && text.contains('(') && text.contains(')') {
+            reaction.error = Some("model wrote calls as text; it cannot do native tool calls".into());
+        }
+
+        let calls = reply.tool_calls.clone().unwrap_or_default();
+        self.history.push(reply);
+        // Every tool call must be answered or the next turn is a protocol error on strict backends.
+        for call in calls {
+            self.history.push(Message::tool_result(call.id, "ok"));
+        }
+
+        reaction.tokens = self.tokens();
+        reaction
+    }
+
+    fn messages(&self) -> Vec<Message> {
+        let mut all = Vec::with_capacity(self.history.len() + 1);
+        all.push(Message::system(self.system.clone()));
+        all.extend(self.history.iter().cloned());
+        all
+    }
+
+    fn tokens(&self) -> usize {
+        self.system.len() / 4 + self.history.iter().map(Message::approx_tokens).sum::<usize>()
+    }
+
+    /// Folds everything older than `keep_recent` into one summary message. Falls back to simply
+    /// dropping the old turns if the summariser itself fails — the window must shrink either way.
+    fn compact_if_needed(&mut self) -> bool {
+        if self.tokens() <= self.config.context_tokens {
+            return false;
+        }
+        let keep = self.config.keep_recent.min(self.history.len());
+        let cut = self.history.len() - keep;
+        if cut == 0 {
+            return false;
+        }
+        let old: Vec<Message> = self.history.drain(..cut).collect();
+
+        let mut ask = vec![Message::system(
+            "Summarise the notes below into at most eight short lines: what the user has been \
+             doing, what you already reacted to, and anything you wanted to remember. Write only \
+             the summary.",
+        )];
+        ask.extend(old.iter().filter(|m| m.role != "tool").cloned());
+
+        let summary = self
+            .client
+            .summarise(&ask)
+            .unwrap_or_else(|_| "Earlier activity, since forgotten.".to_string());
+        self.history.insert(0, Message::system(format!("Earlier:\n{summary}")));
+        true
+    }
+}
+
+/// Buckets the gate's output into quanta and decides when one is ready to send.
+pub struct Quantiser {
+    events: Vec<String>,
+    last_sent: Instant,
+    pub focused: Option<String>,
+    pub workspace: Option<String>,
+    pub present: bool,
+}
+
+impl Default for Quantiser {
+    fn default() -> Self {
+        Self {
+            events: Vec::new(),
+            last_sent: Instant::now(),
+            focused: None,
+            workspace: None,
+            present: true,
+        }
+    }
+}
+
+impl Quantiser {
+    const MAX_EVENTS: usize = 24;
+
+    pub fn observe(&mut self, line: String) {
+        if self.events.len() < Self::MAX_EVENTS {
+            self.events.push(line);
+        }
+    }
+
+    pub fn pending(&self) -> usize {
+        self.events.len()
+    }
+
+    pub fn since_last(&self) -> Duration {
+        self.last_sent.elapsed()
+    }
+
+    /// Returns a quantum once its window has elapsed and there is something to say. An empty
+    /// quantum is skipped entirely — silence costs nothing and is the common case.
+    pub fn take(&mut self, config: &MindConfig, now: Instant) -> Option<Quantum> {
+        let window = if self.present { config.quantum } else { config.idle_quantum };
+        let since = now.duration_since(self.last_sent);
+        if since < window || self.events.is_empty() {
+            return None;
+        }
+        self.last_sent = now;
+        Some(Quantum {
+            events: std::mem::take(&mut self.events),
+            focused: self.focused.clone(),
+            workspace: self.workspace.clone(),
+            present: self.present,
+            since_last: since,
+        })
+    }
+}
+
+/// What a provider can actually do, answered before a surface is ever opened.
+pub struct Probe {
+    pub reachable: bool,
+    pub native_tools: bool,
+    pub detail: String,
+}
+
+/// Reachability plus the only capability that matters: does this model return `tool_calls`, or
+/// does it write calls into the message text? A model that cannot do the former is not usable.
+pub fn probe(config: &Config) -> Result<Probe> {
+    let client = Client::new(config.provider()?.clone())?;
+    let reply = client.chat(
+        &[
+            Message::system("You are a creature on a desktop. Respond only by calling tools."),
+            Message::user("[45s] - the user started watching a long video about films"),
+        ],
+        &capability::schemas(),
+    )?;
+
+    let calls = reply.tool_calls.unwrap_or_default();
+    let text = reply.content.unwrap_or_default();
+    let detail = if !calls.is_empty() {
+        calls.iter().map(|c| c.function.name.as_str()).collect::<Vec<_>>().join(", ")
+    } else if text.trim().is_empty() {
+        "replied with nothing at all".into()
+    } else {
+        format!("replied with text: {}", crate::sensors::clip(text.trim(), 60))
+    };
+    Ok(Probe { reachable: true, native_tools: !calls.is_empty(), detail })
+}

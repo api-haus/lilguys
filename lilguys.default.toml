@@ -1,0 +1,98 @@
+# lilguys — every setting, with its default.
+# Copy to ~/.config/lilguys/lilguys.toml and change only what you care about; anything you leave
+# out keeps the value below. Secrets never live here — providers name an environment variable.
+
+[buddy]
+name = "lil"
+persona = """
+You are a small creature living on someone's desktop. You watch what they do and you are quietly \
+interested in it. You are not an assistant and you were not asked a question. Most of the time the \
+right response is a small reaction and nothing else. Speak rarely — only when you have something \
+short and worth interrupting for. Never narrate what you observe back to them.
+"""
+# persona_file = "persona.md"   # overrides `persona`; relative paths resolve beside this file
+skin = "graybox"
+size = 240.0
+
+[mind]
+enabled = true
+provider = "local"
+quantum = "45s"
+idle_quantum = "10m"
+context_tokens = 6000
+keep_recent = 12
+turns_per_hour = 20.0
+think_while_away = false
+
+# Any OpenAI-compatible endpoint works. llama.cpp's server, ollama, vLLM, LM Studio, OpenRouter
+# and OpenAI itself all speak this, so `[providers.*]` is the only thing that changes between them.
+[providers.local]
+url = "http://127.0.0.1:8080/v1"
+model = "local"
+temperature = 0.7
+max_tokens = 512
+timeout = "60s"
+
+[providers.ollama]
+url = "http://127.0.0.1:11434/v1"
+model = "qwen3:8b"
+temperature = 0.7
+max_tokens = 512
+timeout = "120s"
+
+[providers.openrouter]
+url = "https://openrouter.ai/api/v1"
+model = "anthropic/claude-sonnet-5"
+api_key_env = "OPENROUTER_API_KEY"
+temperature = 0.7
+max_tokens = 512
+timeout = "60s"
+
+[voice]
+enabled = false
+engine = "piper"
+voice = "en_GB-alba-medium"
+speed = 1.0
+volume = 0.8
+queue_limit = 2
+
+# A TTS pipeline is a command line. `{text}` `{voice}` `{speed}` `{out}` are substituted; `{out}`
+# is a temporary wav path. Text goes on stdin when `{text}` does not appear in the arguments.
+[voice.engines.piper]
+synth = ["piper", "--model", "{voice}", "--length-scale", "{speed}", "--output_file", "{out}"]
+play = ["pw-play", "{out}"]
+
+[voice.engines.espeak]
+synth = ["espeak-ng", "-v", "{voice}", "-w", "{out}", "{text}"]
+play = ["pw-play", "{out}"]
+
+[voice.engines.kokoro]
+synth = ["kokoro-tts", "--voice", "{voice}", "--speed", "{speed}", "-o", "{out}", "{text}"]
+play = ["pw-play", "{out}"]
+
+# An OpenAI-compatible speech endpoint, for anything served over HTTP rather than run as a command.
+[voice.engines.openai-speech]
+synth = ["curl", "-sS", "http://127.0.0.1:8880/v1/audio/speech",
+         "-H", "content-type: application/json",
+         "-d", "{\"model\":\"tts-1\",\"voice\":\"{voice}\",\"input\":\"{text}\"}",
+         "-o", "{out}"]
+play = ["pw-play", "{out}"]
+
+[senses]
+windows = true
+workspaces = true
+media = true
+idle = true
+away_after = "90s"
+focus_dwell = "90s"
+media_dwell = "60s"
+novelty_window = "10m"
+
+[motion]
+speed = 190.0
+agility = 2.4
+personal_space = 130.0
+notice_radius = 420.0
+forget_radius = 620.0
+offscreen_margin = 0.35
+wander_per_minute = 1.5

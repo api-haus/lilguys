@@ -1,0 +1,330 @@
+# lilguys — architecture
+
+One daemon, `lilguysd`. It draws a character on a Wayland overlay, senses what happens on the
+desktop, and lets a language model decide what the character does about it.
+
+Everything below describes what the code does today. Design rationale and the measurements behind
+these choices are in [design-space.md](design-space.md); the manual checks are in
+[qa-graybox.md](qa-graybox.md).
+
+## 1. The shape of it
+
+```mermaid
+flowchart LR
+    subgraph world["the desktop"]
+        WL["Wayland<br/>compositor"]
+        DB["D-Bus<br/>session bus"]
+        IPC["Hyprland<br/>IPC socket"]
+    end
+
+    subgraph daemon["lilguysd"]
+        SEN["sensors<br/><i>push, free</i>"]
+        GATE["attention gate<br/><i>local, no model</i>"]
+        QUANT["quantiser<br/><i>time slices</i>"]
+        MIND["reactor<br/><i>one model turn</i>"]
+        BODY["body<br/><i>steering</i>"]
+        AV["avatar<br/><i>the puppet</i>"]
+        VOX["voicebox"]
+    end
+
+    WL --> SEN
+    DB --> SEN
+    SEN --> GATE
+    GATE -->|survivors| QUANT
+    GATE -.->|small local emote| BODY
+    QUANT -->|one slice| MIND
+    MIND -->|intents| BODY
+    MIND -->|speak| VOX
+    BODY --> AV
+    IPC -->|pointer, window rects| BODY
+    AV -->|quads| WL
+    VOX -->|audio| world
+```
+
+Two properties shape every decision:
+
+- **Cheap things happen often, expensive things happen rarely.** The sensors are push-based and
+  cost nothing. The gate is local arithmetic. Only the reactor spends tokens, and it is fed on a
+  slow clock with a hard ceiling.
+- **The mind never touches pixels or protocols.** It emits four kinds of intent. Everything about
+  how those look is below the `Avatar` trait, and everything about where the character goes is in
+  the body.
+
+## 2. Three clocks
+
+Nothing in lilguys runs on one loop. Three run at very different rates, and each only escalates to
+the next when it has to.
+
+| clock | rate | cost | what it does |
+|---|---|---|---|
+| reflex | 60 Hz awake, 8 Hz idle | none | drift, gaze, blink, breathing, click, drag |
+| notice | per event | none | novelty and dwell filtering, a small local emote |
+| think | one slice, at most | tokens | the model decides what to actually do |
+
+The reflex clock is the render tick. It drops to 8 Hz whenever the character is settled and nothing
+is animating, which is most of the time.
+
+## 3. What "quantised event flow" means
+
+**Fixed-length time slices.** Events do not stream to the model. They accumulate in a bucket for a
+whole quantum — 45 seconds by default, 10 minutes once the user is away — and the bucket is then
+rendered as one short report. One slice is at most one model turn.
+
+Three rules make it economical:
+
+1. **An empty slice is never sent.** If nothing survived the gate during the window, no request is
+   made at all. Silence costs nothing and is the common case.
+2. **The window widens when the user leaves.** `idle_quantum` replaces `quantum` the moment the
+   idle notifier fires, so an unattended machine costs almost nothing.
+3. **A slice can still be refused.** `turns_per_hour` is a refilling budget on top of the clock; a
+   busy hour cannot spend more than its allowance no matter how many slices fill up.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as sensors
+    participant G as gate
+    participant Q as quantiser
+    participant M as reactor
+    participant B as body
+
+    S->>G: focus zen — "…Terrible Book"
+    G->>G: unseen → start 90s dwell
+    S->>G: focus ghostty
+    G->>G: seen 20s ago → discard
+    S->>G: playing "Like Stories of Old"
+    G->>G: unseen → start 60s dwell
+
+    Note over G: dwell elapses; both survive
+    G->>Q: append 2 lines
+    G->>B: small local emote (curious)
+
+    Note over Q: quantum still open — nothing sent
+
+    Note over Q,M: 45s boundary, bucket non-empty
+    Q->>M: Quantum{events, focused, workspace, present}
+    M->>M: compact if over context_tokens
+    M->>M: one chat completion, four tools offered
+    M-->>B: react(curious, 0.6) · focus(window "zen")
+    Note over M,B: no speak — silence is the default
+```
+
+The framing line at the top of every slice carries state rather than events: how long the window
+was, whether the user is present, the active workspace, the focused window. That way the model can
+tell "nothing happened because they left" from "nothing happened because they are concentrating".
+
+## 4. The attention gate
+
+The gate is the reason the reactor is affordable. It runs locally, spends nothing, and discards
+most of what it sees.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Judge: observation arrives
+    Judge --> Ignored: key seen inside novelty_window
+    Judge --> Emote: ambient (workspace, presence)
+    Judge --> Pending: could matter (focus, title, media)
+    Pending --> Pending: dwell not elapsed
+    Pending --> Think: dwell elapsed, budget allows
+    Pending --> Emote: dwell elapsed, budget spent
+    Ignored --> [*]
+    Emote --> [*]: face only, never a token
+    Think --> [*]: appended to the current slice
+```
+
+Every observation carries a **key** — `focus:zen:<title>`, `media:<url>:<title>` — and a repeat of
+the same key inside `novelty_window` is dropped outright. Alt-tabbing between two windows twenty
+times produces two observations, not forty.
+
+Dwell is what stops the buddy reacting to things you passed through. A window must hold focus for
+`focus_dwell`; a track must play for `media_dwell`. Skipping a video means its transcript is never
+worth fetching, and the gate is where that is decided.
+
+## 5. Senses
+
+Each sensor is one source, and each is independently switchable in `[senses]`. None of them poll,
+and none of them look at pixels.
+
+| sensor | source | gives |
+|---|---|---|
+| windows | `zwlr_foreign_toplevel_manager_v1` | focus changes, app ids, live titles |
+| workspaces | `ext_workspace_manager_v1` | which workspace is active, switch events |
+| idle | `ext_idle_notifier_v1` | user went away, user came back |
+| media | MPRIS on D-Bus | title, artist, and **the URL** of whatever is playing |
+| pointer | Hyprland IPC | cursor position, 14.6 µs per read |
+| geometry | Hyprland IPC | window rectangles, for `focus(window)` |
+
+The Wayland sensors ride the same connection as the surface — no second socket, no second thread.
+MPRIS gets its own thread because D-Bus is blocking and a stalled bus must never stall rendering.
+
+Media is the sense that matters most and costs least. A `PropertiesChanged` signal carries
+`xesam:url`, so a YouTube watch id arrives as a free push event and a transcript is one HTTP call
+away. No screen capture, no OCR, no browser extension.
+
+## 6. The reactor
+
+Its own thread, blocking HTTP, one turn per slice.
+
+```mermaid
+flowchart TD
+    Q["Quantum arrives"] --> P{"user present<br/>or think_while_away?"}
+    P -->|no| DROP["drop, no request"]
+    P -->|yes| BUD{"turns_per_hour<br/>budget?"}
+    BUD -->|spent| DROP2["drop, note the reason"]
+    BUD -->|allows| CMP{"over<br/>context_tokens?"}
+    CMP -->|yes| SUM["summarise everything<br/>older than keep_recent<br/>into one system message"]
+    CMP -->|no| CHAT
+    SUM --> CHAT["chat completion<br/>4 tools offered"]
+    CHAT --> TC{"tool_calls<br/>returned?"}
+    TC -->|yes| INT["parse to intents"]
+    TC -->|no, but text| ERR["report: model cannot<br/>do native tool calls"]
+    TC -->|no, silent| NONE["do nothing — valid<br/>and common"]
+    INT --> HIST["append reply plus one<br/>tool result per call"]
+```
+
+**Context is a plain message list that compacts in place.** Above `context_tokens`, everything
+older than `keep_recent` turns is sent back to the same model with a summarise instruction, and the
+result replaces it as a single system message. If summarising itself fails, the old turns are
+dropped anyway — the window has to shrink either way.
+
+**Tool calls must be native.** If a model writes `react(pleased)` into the message text instead of
+using the tool channel, lilguys reports that as an error rather than parsing around it.
+`lilguysd --check` answers this before you ever run the daemon.
+
+## 7. The four capabilities
+
+The model has exactly four tools, ordered from cheap and quiet to loud and interrupting. The system
+prompt says to prefer them in that order, and that calling nothing at all is a normal response.
+
+```mermaid
+flowchart LR
+    R["react<br/><i>face only</i>"] --> G["gesture<br/><i>whole body</i>"]
+    G --> F["focus<br/><i>go somewhere</i>"]
+    F --> S["speak<br/><i>interrupts</i>"]
+    R -.-> RD["emotion + intensity + hold<br/>eases onto Pose params"]
+    G -.-> GD["one of eight, each with<br/>a duration and an envelope"]
+    F -.-> FD["window · pointer · place · away<br/>becomes a steering target"]
+    S -.-> SD["one short sentence<br/>into the voicebox queue"]
+```
+
+`focus` is the only one that needs the outside world: `focus(window, match: "zen")` looks the
+rectangle up through Hyprland IPC, because no Wayland protocol will tell one client where another
+client's window is. `focus(away)` sends the character off the edge of the screen on purpose.
+
+## 8. Body and avatar
+
+The body is steering. There is no gravity, no ground, and no jump — a lilguy floats, drifts, and
+may leave the screen.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Noticing: pointer within notice_radius
+    Noticing --> Idle: pointer beyond forget_radius
+    Idle --> Seeking: wander, or focus() from the mind
+    Noticing --> Seeking: focus() from the mind
+    Seeking --> Lingering: arrived
+    Lingering --> Idle: linger elapsed
+    Idle --> Leaving: focus(away)
+    Leaving --> Idle: offscreen and nothing to do
+    Idle --> Held: clicked and dragged
+    Held --> Idle: released
+```
+
+Movement is seek-with-arrival plus a slow figure-of-eight float, so he is never perfectly still.
+`offscreen_margin` decides how far past the edge he may drift; only `Leaving` ignores it.
+
+The seam below the body is one trait:
+
+```mermaid
+classDiagram
+    class Avatar {
+        <<trait>>
+        +advance(pose, drive, dt)
+        +draw(painter, origin, facing, scale)
+        +bounds() Bounds
+        +hit(local) bool
+    }
+    class Pose {
+        20 named parameters
+        head_yaw, gaze_x, eye_open_l,
+        mouth_open, breath, joy, …
+    }
+    class Drive {
+        speed, heading, bob_phase
+        gesture(kind, 0..1)
+        speaking
+    }
+    Avatar <|.. Graybox
+    Avatar <|.. Live2D : planned
+    Avatar <|.. VRM : planned
+    Avatar ..> Pose
+    Avatar ..> Drive
+```
+
+`Pose` names follow Live2D's standard parameter set, which makes the whole VTuber model corpus an
+asset library and maps cleanly onto glTF morph targets. `Drive` carries what is not a facial
+parameter: travel, gesture progress, and whether the mouth should be moving.
+
+`hit()` is load-bearing beyond drawing — it produces the input region, and everything outside that
+rectangle passes clicks through to whatever is underneath.
+
+## 9. Voice
+
+A TTS pipeline is a command line. That is the whole abstraction.
+
+```toml
+[voice.engines.piper]
+synth = ["piper", "--model", "{voice}", "--length-scale", "{speed}", "--output_file", "{out}"]
+play  = ["pw-play", "{out}"]
+```
+
+`{text}` `{voice}` `{speed}` `{out}` are substituted; text goes on stdin when `{text}` does not
+appear in the arguments. Piper, espeak-ng, kokoro, XTTS and any OpenAI-compatible `/v1/audio/speech`
+endpoint reached through `curl` are therefore the same thing to lilguys, and adding one is a config
+entry rather than a code change.
+
+Synthesis runs on its own thread with a short queue. Beyond `queue_limit` an utterance is refused
+rather than queued — a buddy talking over itself is worse than one that missed a line. While it
+speaks, `Drive::speaking` moves the mouth and blocks the expression layer from fighting it.
+
+## 10. Threads
+
+```mermaid
+flowchart TD
+    MAIN["main thread — calloop<br/>wayland events, render tick,<br/>sensors, gate, quantiser, body"]
+    MPRIS["mpris thread<br/>blocking D-Bus"]
+    MIND["mind thread<br/>blocking HTTP"]
+    VOICE["voice thread<br/>synth and playback"]
+    MPRIS -->|Observation| MAIN
+    MIND -->|Reaction| MAIN
+    VOICE -->|Speaking / Silent| MAIN
+    MAIN -->|Quantum| MIND
+    MAIN -->|text| VOICE
+```
+
+Every thread that can block owns a channel into the calloop event loop and nothing else. The main
+thread never waits on D-Bus, HTTP, or a subprocess, which is why a dead endpoint or a missing TTS
+binary degrades one sense instead of freezing the character.
+
+## 11. Configuration
+
+One TOML file, `~/.config/lilguys/lilguys.toml`, naming nothing internal. A partial file is merged
+onto the bundled defaults, so it need only contain what differs.
+
+- `lilguysd --print-config` writes a fully commented starting point.
+- `lilguysd --check` validates it, resolves the provider, probes the model for **native tool-call
+  support**, and reports whether the TTS binary is on `PATH` — all without opening a surface.
+
+Providers are interchangeable because every one speaks the OpenAI chat-completions wire format:
+llama.cpp's server, ollama, vLLM, LM Studio, OpenRouter, OpenAI. Switching between local and hosted
+is a `provider = ` line. API keys are named by environment variable and never live in the file.
+
+## 12. Not yet built
+
+- **Memory.** Deferred by decision. The reactor's private notes are the seed for it.
+- **hermes link.** Clicking the character opens a channel adapter; ambient observations become a
+  plugin writing to memory rather than into a live conversation.
+- **Live2D and VRM adapters**, over the same `Pose` and `Drive`.
+- **Clipboard and AT-SPI senses**, both free and both push-based.
+- **Per-window capture** — the only planned sense that costs anything.

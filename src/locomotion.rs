@@ -1,230 +1,322 @@
-//! Where the buddy is and why he moved there. Hysteresis and dwell are the personality — see docs/design-space.md §5.
+//! Where a lilguy is and why. Nothing here knows about gravity — see docs/design-space.md §5.
 
-use crate::avatar::{Param, Pose};
+use crate::avatar::{Emotion, Gesture, Param, Pose};
+use crate::config::Motion;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum Gait {
+pub enum Drift {
+    /// Floating in place, minding its own business.
     Idle,
+    /// Watching the pointer without committing to anything.
     Noticing,
-    Approaching,
-    Retreating,
-    Settling,
-    Dragged,
+    /// Travelling to a chosen point.
+    Seeking,
+    /// Arrived, staying a while.
+    Lingering,
+    /// Heading off the edge of the screen on purpose.
+    Leaving,
+    Held,
 }
 
-impl Gait {
+impl Drift {
     pub fn name(self) -> &'static str {
         match self {
-            Gait::Idle => "idle",
-            Gait::Noticing => "noticing",
-            Gait::Approaching => "approaching",
-            Gait::Retreating => "retreating",
-            Gait::Settling => "settling",
-            Gait::Dragged => "dragged",
+            Drift::Idle => "idle",
+            Drift::Noticing => "noticing",
+            Drift::Seeking => "seeking",
+            Drift::Lingering => "lingering",
+            Drift::Leaving => "leaving",
+            Drift::Held => "held",
         }
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct Tuning {
-    /// Cursor closer than this earns a look.
-    pub notice_radius: f32,
-    /// Cursor further than this stops earning one. Must exceed `notice_radius`.
-    pub forget_radius: f32,
-    /// He will not stand closer than this.
-    pub personal_space: f32,
-    /// Beyond this he may consider walking over.
-    pub approach_radius: f32,
-    /// Seconds the cursor must hold still inside `notice_radius` before he looks.
-    pub notice_dwell: f32,
-    /// Seconds before he commits to actually walking. Deliberately long.
-    pub approach_dwell: f32,
-    pub walk_speed: f32,
-    pub accel: f32,
-    /// Seconds of stillness after arriving, before Idle resumes.
-    pub settle_time: f32,
-    /// Seconds the cursor must sit behind him before he turns to face it.
-    pub turn_dwell: f32,
-    /// Character height in pixels.
-    pub height: f32,
-}
-
-impl Default for Tuning {
-    fn default() -> Self {
-        Self {
-            notice_radius: 420.0,
-            forget_radius: 620.0,
-            personal_space: 140.0,
-            approach_radius: 700.0,
-            notice_dwell: 0.35,
-            approach_dwell: 2.5,
-            walk_speed: 210.0,
-            accel: 900.0,
-            settle_time: 1.2,
-            turn_dwell: 0.7,
-            height: 240.0,
-        }
-    }
+pub struct Target {
+    pub at: [f32; 2],
+    /// Seconds to stay once arrived. Negative means leave and do not come back.
+    pub linger: f32,
+    pub label: String,
 }
 
 pub struct Body {
     pub pos: [f32; 2],
-    pub vel_x: f32,
+    pub vel: [f32; 2],
     pub facing: f32,
-    pub gait: Gait,
-    pub tuning: Tuning,
-    pub ground_y: f32,
+    pub drift: Drift,
+    pub motion: Motion,
+    pub size: f32,
+    pub bounds: [f32; 2],
     pub cursor_dist: f32,
-    target_x: f32,
-    dwell: f32,
+    pub emotion: Emotion,
+    pub emotion_weight: f32,
+    pub speaking: bool,
+    target: Option<Target>,
+    emotion_hold: f32,
+    gesture: Option<(Gesture, f32)>,
+    linger_left: f32,
     state_age: f32,
+    turn_dwell: f32,
+    wander_roll: f32,
     blink_timer: f32,
     blink_phase: f32,
     breath: f32,
-    step_phase: f32,
+    bob: f32,
     sway: f32,
-    turn_dwell: f32,
 }
 
 impl Body {
-    pub fn new(tuning: Tuning, ground_y: f32, x: f32) -> Self {
+    pub fn new(motion: Motion, size: f32, bounds: [f32; 2]) -> Self {
         Self {
-            pos: [x, ground_y],
-            vel_x: 0.0,
+            pos: [bounds[0] * 0.5, bounds[1] * 0.55],
+            vel: [0.0, 0.0],
             facing: 1.0,
-            gait: Gait::Idle,
-            tuning,
-            ground_y,
+            drift: Drift::Idle,
+            motion,
+            size,
+            bounds,
             cursor_dist: f32::MAX,
-            target_x: x,
-            dwell: 0.0,
+            emotion: Emotion::Neutral,
+            emotion_weight: 0.0,
+            speaking: false,
+            target: None,
+            emotion_hold: 0.0,
+            gesture: None,
+            linger_left: 0.0,
             state_age: 0.0,
+            turn_dwell: 0.0,
+            wander_roll: 0.0,
             blink_timer: 2.0,
             blink_phase: 0.0,
             breath: 0.0,
-            step_phase: 0.0,
+            bob: 0.0,
             sway: 0.0,
-            turn_dwell: 0.0,
         }
     }
 
-    fn enter(&mut self, gait: Gait) {
-        if self.gait != gait {
-            self.gait = gait;
+    fn enter(&mut self, drift: Drift) {
+        if self.drift != drift {
+            self.drift = drift;
             self.state_age = 0.0;
-            self.dwell = 0.0;
         }
+    }
+
+    // ---- commands from the mind ------------------------------------------------
+
+    pub fn go_to(&mut self, target: Target) {
+        self.linger_left = target.linger;
+        let leaving = target.linger < 0.0;
+        self.target = Some(target);
+        self.enter(if leaving { Drift::Leaving } else { Drift::Seeking });
+    }
+
+    pub fn feel(&mut self, emotion: Emotion, intensity: f32, hold: f32) {
+        self.emotion = emotion;
+        self.emotion_weight = intensity.clamp(0.0, 1.0);
+        self.emotion_hold = hold.max(0.5);
+    }
+
+    pub fn perform(&mut self, gesture: Gesture) {
+        self.gesture = Some((gesture, 0.0));
+    }
+
+    pub fn gesture(&self) -> Option<(Gesture, f32)> {
+        self.gesture.map(|(g, t)| (g, (t / g.duration()).clamp(0.0, 1.0)))
+    }
+
+    pub fn target_label(&self) -> Option<&str> {
+        self.target.as_ref().map(|t| t.label.as_str())
+    }
+
+    pub fn bob_phase(&self) -> f32 {
+        self.bob
+    }
+
+    pub fn speed(&self) -> f32 {
+        (self.vel[0] * self.vel[0] + self.vel[1] * self.vel[1]).sqrt()
+    }
+
+    pub fn heading(&self) -> [f32; 2] {
+        let s = self.speed();
+        if s < 1.0 {
+            return [self.facing, 0.0];
+        }
+        [self.vel[0] / s, self.vel[1] / s]
+    }
+
+    pub fn moving(&self) -> bool {
+        self.speed() > 4.0
+    }
+
+    /// True once he has drifted fully out of sight, so the surface can stop rendering.
+    pub fn offscreen(&self) -> bool {
+        let m = self.size;
+        self.pos[0] < -m || self.pos[0] > self.bounds[0] + m || self.pos[1] < -m
+            || self.pos[1] > self.bounds[1] + m
     }
 
     pub fn grab(&mut self) {
-        self.enter(Gait::Dragged);
-        self.vel_x = 0.0;
+        self.enter(Drift::Held);
+        self.vel = [0.0, 0.0];
+        self.target = None;
     }
 
     pub fn drag_to(&mut self, x: f32, y: f32) {
-        if self.gait == Gait::Dragged {
-            self.pos = [x, y];
+        if self.drift == Drift::Held {
+            let next = [x, y + self.size * 0.35];
+            self.vel = [(next[0] - self.pos[0]) * 12.0, (next[1] - self.pos[1]) * 12.0];
+            self.pos = next;
         }
     }
 
     pub fn release(&mut self) {
-        if self.gait == Gait::Dragged {
-            self.pos[1] = self.ground_y;
-            self.enter(Gait::Settling);
+        if self.drift == Drift::Held {
+            self.enter(Drift::Idle);
         }
     }
 
-    /// One tick. `cursor` is in the same surface pixel space as `pos`.
+    // ---- the tick --------------------------------------------------------------
+
     pub fn update(&mut self, cursor: [f32; 2], dt: f32, pose: &mut Pose) {
         self.state_age += dt;
-        let t = self.tuning.clone();
+        let m = self.motion.clone();
 
-        let dx = cursor[0] - self.pos[0];
-        let dy = cursor[1] - (self.pos[1] - t.height * 0.78); // measure from the eyes, not the feet
-        let dist = (dx * dx + dy * dy).sqrt();
-        self.cursor_dist = dist;
+        let eye = [self.pos[0], self.pos[1] - self.size * 0.28];
+        let (dx, dy) = (cursor[0] - eye[0], cursor[1] - eye[1]);
+        self.cursor_dist = (dx * dx + dy * dy).sqrt();
 
-        self.decide(dist, dx, dt, &t);
-        self.locomote(dt, &t);
-        self.face(dx, dt, &t);
-        self.drive_face(dx, dy, dist, dt, &t, pose);
+        self.decide(dt, &m);
+        self.steer(dt, &m);
+        self.face(dx, dt, &m);
+        self.advance_gesture(dt);
+        self.drive_face(dx, dy, dt, &m, pose);
         self.drive_idle(dt, pose);
+        self.apply_emotion(dt, pose);
     }
 
-    fn decide(&mut self, dist: f32, dx: f32, dt: f32, t: &Tuning) {
-        match self.gait {
-            Gait::Dragged => {}
-            Gait::Idle => {
-                self.dwell = if dist < t.notice_radius { self.dwell + dt } else { 0.0 };
-                if self.dwell >= t.notice_dwell {
-                    self.enter(Gait::Noticing);
+    fn decide(&mut self, dt: f32, m: &Motion) {
+        match self.drift {
+            Drift::Held => {}
+            Drift::Leaving => {
+                if self.offscreen() && self.state_age > 4.0 {
+                    // Nothing out here to do; come back rather than vanish forever.
+                    self.target = None;
+                    self.enter(Drift::Idle);
                 }
             }
-            Gait::Noticing => {
-                if dist > t.forget_radius {
-                    self.enter(Gait::Idle);
-                    return;
-                }
-                // A cursor already within reach is worth a look and nothing more.
-                let far = dist > t.approach_radius * 0.5 && dist > t.personal_space * 1.6;
-                self.dwell = if far { self.dwell + dt } else { 0.0 };
-                if self.dwell >= t.approach_dwell {
-                    self.target_x = self.pos[0] + dx - t.personal_space * dx.signum();
-                    self.enter(Gait::Approaching);
-                }
-                if dist < t.personal_space * 0.6 {
-                    self.target_x = self.pos[0] - dx.signum() * t.personal_space;
-                    self.enter(Gait::Retreating);
+            Drift::Seeking => {
+                if self.arrived() {
+                    self.enter(Drift::Lingering);
+                } else if self.state_age > 12.0 {
+                    self.target = None;
+                    self.enter(Drift::Idle);
                 }
             }
-            Gait::Approaching | Gait::Retreating => {
-                if (self.target_x - self.pos[0]).abs() < 6.0 {
-                    self.enter(Gait::Settling);
-                }
-                if self.state_age > 8.0 {
-                    self.enter(Gait::Settling); // never walk forever
+            Drift::Lingering => {
+                self.linger_left -= dt;
+                if self.linger_left <= 0.0 {
+                    self.target = None;
+                    self.enter(Drift::Idle);
                 }
             }
-            Gait::Settling => {
-                if self.state_age >= t.settle_time {
-                    self.enter(if dist < t.notice_radius { Gait::Noticing } else { Gait::Idle });
+            Drift::Idle | Drift::Noticing => {
+                let near = self.cursor_dist < m.notice_radius;
+                let far = self.cursor_dist > m.forget_radius;
+                if near && self.drift == Drift::Idle {
+                    self.enter(Drift::Noticing);
+                } else if far && self.drift == Drift::Noticing {
+                    self.enter(Drift::Idle);
                 }
+                self.maybe_wander(dt, m);
             }
         }
     }
 
-    fn locomote(&mut self, dt: f32, t: &Tuning) {
-        let walking = matches!(self.gait, Gait::Approaching | Gait::Retreating);
-        let want = if walking {
-            let d = self.target_x - self.pos[0];
-            d.signum() * t.walk_speed * (d.abs() / 80.0).min(1.0)
-        } else {
-            0.0
+    /// Occasionally picks somewhere to be for no reason. Without this he only ever moves when
+    /// told to, and reads as a widget rather than a creature.
+    fn maybe_wander(&mut self, dt: f32, m: &Motion) {
+        if m.wander_per_minute <= 0.0 || self.state_age < 6.0 {
+            return;
+        }
+        self.wander_roll += dt * m.wander_per_minute / 60.0;
+        if self.wander_roll < 1.0 {
+            return;
+        }
+        self.wander_roll = 0.0;
+        // Deterministic scatter from the clocks already running; no RNG dependency for a wander.
+        let a = (self.sway * 12.9898 + self.breath * 78.233).sin() * 43758.547;
+        let b = (self.bob * 39.3468 + self.sway * 11.135).sin() * 24634.633;
+        let at = [
+            (a.fract().abs() * 0.8 + 0.1) * self.bounds[0],
+            (b.fract().abs() * 0.7 + 0.12) * self.bounds[1],
+        ];
+        self.go_to(Target { at, linger: 8.0 + a.fract().abs() * 20.0, label: "wandering".into() });
+    }
+
+    fn arrived(&self) -> bool {
+        let Some(t) = self.target.as_ref() else { return true };
+        let (dx, dy) = (t.at[0] - self.pos[0], t.at[1] - self.pos[1]);
+        (dx * dx + dy * dy).sqrt() < self.size * 0.18
+    }
+
+    /// Seek-with-arrival, plus a slow float. No ground, no fall, no jump.
+    fn steer(&mut self, dt: f32, m: &Motion) {
+        if self.drift == Drift::Held {
+            return;
+        }
+        let want = match (&self.target, self.drift) {
+            (Some(t), Drift::Seeking | Drift::Leaving) => {
+                let d = [t.at[0] - self.pos[0], t.at[1] - self.pos[1]];
+                let dist = (d[0] * d[0] + d[1] * d[1]).sqrt().max(0.001);
+                let ease = (dist / (self.size * 1.2)).min(1.0);
+                [d[0] / dist * m.speed * ease, d[1] / dist * m.speed * ease]
+            }
+            _ => [0.0, 0.0],
         };
-        let k = 1.0 - (-t.accel / t.walk_speed.max(1.0) * dt).exp();
-        self.vel_x += (want - self.vel_x) * k;
-        self.pos[0] += self.vel_x * dt;
 
-        if self.vel_x.abs() > 12.0 {
-            self.step_phase += self.vel_x.abs() / 46.0 * dt * std::f32::consts::TAU;
-        } else {
-            // Ease the swing back to neutral so he does not freeze mid-stride.
-            self.step_phase = unwind(self.step_phase, dt * 6.0);
+        let k = 1.0 - (-m.agility * dt).exp();
+        self.vel[0] += (want[0] - self.vel[0]) * k;
+        self.vel[1] += (want[1] - self.vel[1]) * k;
+        self.pos[0] += self.vel[0] * dt;
+        self.pos[1] += self.vel[1] * dt;
+
+        // A gentle figure-of-eight so he is never perfectly still.
+        self.bob += dt * 1.15;
+        self.pos[0] += (self.bob * 0.5).sin() * 6.0 * dt;
+        self.pos[1] += self.bob.sin() * 9.0 * dt;
+
+        self.contain(m);
+    }
+
+    /// He may leave the screen, but only when he meant to.
+    fn contain(&mut self, m: &Motion) {
+        if self.drift == Drift::Leaving || self.drift == Drift::Held {
+            return;
+        }
+        let slack = [self.bounds[0] * m.offscreen_margin, self.bounds[1] * m.offscreen_margin];
+        let lo = [-slack[0], -slack[1]];
+        let hi = [self.bounds[0] + slack[0], self.bounds[1] + slack[1]];
+        for i in 0..2 {
+            if self.pos[i] < lo[i] {
+                self.pos[i] = lo[i];
+                self.vel[i] = self.vel[i].abs() * 0.4;
+            } else if self.pos[i] > hi[i] {
+                self.pos[i] = hi[i];
+                self.vel[i] = -self.vel[i].abs() * 0.4;
+            }
         }
     }
 
-    /// Facing follows the walk. Standing still, he turns only for a cursor that stays behind him —
-    /// without the dwell he pivots at every stray flick of the mouse.
-    fn face(&mut self, dx: f32, dt: f32, t: &Tuning) {
-        if self.vel_x.abs() > 12.0 {
-            self.facing = self.vel_x.signum();
+    fn face(&mut self, dx: f32, dt: f32, m: &Motion) {
+        if self.vel[0].abs() > 22.0 {
+            self.facing = self.vel[0].signum();
             self.turn_dwell = 0.0;
             return;
         }
-        let behind = dx.abs() > t.personal_space * 0.5 && dx.signum() != self.facing;
-        if behind && self.gait != Gait::Idle {
+        let behind = dx.abs() > m.personal_space * 0.5 && dx.signum() != self.facing;
+        if behind && self.drift != Drift::Idle {
             self.turn_dwell += dt;
-            if self.turn_dwell >= t.turn_dwell {
+            if self.turn_dwell >= 0.7 {
                 self.facing = dx.signum();
                 self.turn_dwell = 0.0;
             }
@@ -233,10 +325,25 @@ impl Body {
         }
     }
 
-    fn drive_face(&mut self, dx: f32, dy: f32, dist: f32, dt: f32, t: &Tuning, pose: &mut Pose) {
-        let attentive = self.gait != Gait::Idle && dist < t.forget_radius;
-        let (gx, gy) = if attentive {
-            ((dx / t.forget_radius).clamp(-1.0, 1.0), (dy / (t.forget_radius * 0.6)).clamp(-1.0, 1.0))
+    fn advance_gesture(&mut self, dt: f32) {
+        let Some((g, t)) = self.gesture.as_mut() else { return };
+        *t += dt;
+        if *t >= g.duration() {
+            self.gesture = None;
+        }
+    }
+
+    fn drive_face(&mut self, dx: f32, dy: f32, dt: f32, m: &Motion, pose: &mut Pose) {
+        let watching = match self.drift {
+            Drift::Idle | Drift::Leaving => false,
+            _ => self.cursor_dist < m.forget_radius,
+        };
+        let (gx, gy) = if watching {
+            ((dx / m.forget_radius).clamp(-1.0, 1.0), (dy / (m.forget_radius * 0.6)).clamp(-1.0, 1.0))
+        } else if self.moving() {
+            // Look where you are going.
+            let h = self.heading();
+            (h[0], h[1] * 0.5)
         } else {
             (0.0, 0.0)
         };
@@ -247,17 +354,6 @@ impl Body {
         pose.ease_to(Param::HeadYaw, gx * 0.75, 6.0, dt);
         pose.ease_to(Param::HeadPitch, gy * 0.55, 6.0, dt);
         pose.ease_to(Param::BodyYaw, gx * 0.30, 2.5, dt);
-
-        let interest = match self.gait {
-            Gait::Noticing => 0.35,
-            Gait::Approaching => 0.55,
-            Gait::Retreating => 0.0,
-            Gait::Dragged => 0.9,
-            _ => 0.1,
-        };
-        pose.ease_to(Param::BrowL, interest, 4.0, dt);
-        pose.ease_to(Param::BrowR, interest, 4.0, dt);
-        pose.ease_to(Param::Surprise, (self.gait == Gait::Dragged) as u8 as f32, 8.0, dt);
     }
 
     fn drive_idle(&mut self, dt: f32, pose: &mut Pose) {
@@ -265,7 +361,7 @@ impl Body {
         pose.set(Param::Breath, self.breath.sin() * 0.5 + 0.5);
 
         self.sway += dt * 0.37;
-        pose.ease_to(Param::HeadRoll, self.sway.sin() * 0.08, 3.0, dt);
+        pose.ease_to(Param::BodyRoll, self.sway.sin() * 0.10, 2.0, dt);
 
         self.blink_timer -= dt;
         if self.blink_timer <= 0.0 {
@@ -279,19 +375,33 @@ impl Body {
         let open = 1.0 - (self.blink_phase * std::f32::consts::PI).sin().abs();
         pose.set(Param::EyeOpenL, open);
         pose.set(Param::EyeOpenR, open);
+
+        if self.speaking {
+            // Mouth flap keyed to nothing in particular; real visemes need the synthesiser.
+            let flap = ((self.bob * 9.0).sin() * 0.5 + 0.5).powf(1.5);
+            pose.ease_to(Param::MouthOpen, 0.15 + flap * 0.5, 22.0, dt);
+        }
     }
 
-    pub fn step_phase(&self) -> f32 {
-        self.step_phase
+    fn apply_emotion(&mut self, dt: f32, pose: &mut Pose) {
+        if self.emotion_hold > 0.0 {
+            self.emotion_hold -= dt;
+            if self.emotion_hold <= 0.0 {
+                self.emotion_weight = 0.0;
+            }
+        }
+        if self.emotion_weight <= 0.001 {
+            return;
+        }
+        for (p, target) in self.emotion.targets() {
+            // Blinks and speech own their parameters outright; an expression must not fight them.
+            if matches!(p, Param::EyeOpenL | Param::EyeOpenR) && self.blink_phase > 0.0 {
+                continue;
+            }
+            if matches!(p, Param::MouthOpen) && self.speaking {
+                continue;
+            }
+            pose.ease_to(*p, target * self.emotion_weight, 5.0, dt);
+        }
     }
-
-    pub fn moving(&self) -> bool {
-        self.vel_x.abs() > 1.0
-    }
-}
-
-fn unwind(a: f32, k: f32) -> f32 {
-    use std::f32::consts::{PI, TAU};
-    let wrapped = (a + PI).rem_euclid(TAU) - PI;
-    wrapped * (1.0 - k.clamp(0.0, 1.0))
 }

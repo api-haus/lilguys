@@ -1,0 +1,143 @@
+//! One blocking client for every OpenAI-compatible endpoint. Providers differ only by base URL.
+
+use crate::config::Provider;
+use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Message {
+    pub role: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+impl Message {
+    pub fn system(text: impl Into<String>) -> Self {
+        Self::plain("system", text)
+    }
+
+    pub fn user(text: impl Into<String>) -> Self {
+        Self::plain("user", text)
+    }
+
+    pub fn plain(role: &str, text: impl Into<String>) -> Self {
+        Self {
+            role: role.into(),
+            content: Some(text.into()),
+            tool_calls: None,
+            tool_call_id: None,
+        }
+    }
+
+    pub fn tool_result(id: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            role: "tool".into(),
+            content: Some(text.into()),
+            tool_calls: None,
+            tool_call_id: Some(id.into()),
+        }
+    }
+
+    /// Four characters to a token is close enough to schedule compaction by.
+    pub fn approx_tokens(&self) -> usize {
+        let body = self.content.as_deref().map(str::len).unwrap_or(0);
+        let calls = self
+            .tool_calls
+            .as_ref()
+            .map(|c| c.iter().map(|c| c.function.arguments.len() + 24).sum::<usize>())
+            .unwrap_or(0);
+        (body + calls) / 4 + 4
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ToolCall {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default = "call_kind")]
+    pub r#type: String,
+    pub function: FunctionCall,
+}
+
+fn call_kind() -> String {
+    "function".into()
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FunctionCall {
+    pub name: String,
+    #[serde(default)]
+    pub arguments: String,
+}
+
+pub struct Client {
+    provider: Provider,
+    agent: ureq::Agent,
+    key: Option<String>,
+}
+
+impl Client {
+    pub fn new(provider: Provider) -> Result<Self> {
+        let key = match provider.api_key_env.as_ref() {
+            Some(var) => Some(
+                std::env::var(var)
+                    .with_context(|| format!("{var} is not set, but the provider wants a key"))?,
+            ),
+            None => None,
+        };
+        let agent = ureq::Agent::config_builder()
+            .timeout_global(Some(provider.timeout))
+            .build()
+            .into();
+        Ok(Self { provider, agent, key })
+    }
+
+    pub fn model(&self) -> &str {
+        &self.provider.model
+    }
+
+    pub fn chat(&self, messages: &[Message], tools: &Value) -> Result<Message> {
+        let mut body = json!({
+            "model": self.provider.model,
+            "messages": messages,
+            "temperature": self.provider.temperature,
+            "max_tokens": self.provider.max_tokens,
+        });
+        if !tools.as_array().map(|a| a.is_empty()).unwrap_or(true) {
+            body["tools"] = tools.clone();
+            body["tool_choice"] = json!("auto");
+        }
+
+        let url = format!("{}/chat/completions", self.provider.url.trim_end_matches('/'));
+        let mut req = self.agent.post(&url).header("content-type", "application/json");
+        if let Some(key) = self.key.as_deref() {
+            req = req.header("authorization", &format!("Bearer {key}"));
+        }
+        for (k, v) in &self.provider.headers {
+            req = req.header(k, v);
+        }
+
+        let mut res = req.send_json(&body).context("chat request failed")?;
+        let parsed: Value = res.body_mut().read_json().context("chat response was not json")?;
+        if let Some(err) = parsed.get("error") {
+            bail!("provider error: {err}");
+        }
+        let choice = parsed
+            .get("choices")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("message"))
+            .context("chat response had no message")?;
+        serde_json::from_value(choice.clone()).context("could not read the assistant message")
+    }
+
+    /// A plain completion with no tools, used for context compaction.
+    pub fn summarise(&self, messages: &[Message]) -> Result<String> {
+        let reply = self.chat(messages, &json!([]))?;
+        Ok(reply.content.unwrap_or_default())
+    }
+}

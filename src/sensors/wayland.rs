@@ -2,6 +2,7 @@
 
 use super::{Bus, Observation};
 use crate::app::App;
+use crate::config::Senses;
 use std::collections::HashMap;
 use wayland_client::{
     globals::{BindError, GlobalList},
@@ -20,9 +21,6 @@ use wayland_protocols_wlr::foreign_toplevel::v1::client::{
     zwlr_foreign_toplevel_handle_v1::{self, State as TopState, ZwlrForeignToplevelHandleV1},
     zwlr_foreign_toplevel_manager_v1::{self, ZwlrForeignToplevelManagerV1},
 };
-
-/// Seconds of no input before the buddy treats the user as gone.
-const AWAY_AFTER: u32 = 90_000;
 
 #[derive(Default)]
 struct Toplevel {
@@ -43,27 +41,50 @@ pub struct Sensors {
     pub present: bool,
     idle_notifier: Option<ExtIdleNotifierV1>,
     idle_notification: Option<ExtIdleNotificationV1>,
+    away_after_ms: u32,
 }
 
 impl Sensors {
-    pub fn bind(globals: &GlobalList, qh: &QueueHandle<App>) -> Self {
-        let mut me = Self { present: true, ..Default::default() };
+    pub fn bind(globals: &GlobalList, qh: &QueueHandle<App>, senses: &Senses) -> Self {
+        let mut me = Self {
+            present: true,
+            away_after_ms: senses.away_after.as_millis().min(u32::MAX as u128) as u32,
+            ..Default::default()
+        };
         // Every one of these is optional: a compositor without them costs the buddy a sense, not a
         // crash. Hyprland 0.56 carries all three.
-        match globals.bind::<ZwlrForeignToplevelManagerV1, _, _>(qh, 1..=3, ()) {
-            Ok(_) => {}
-            Err(e) => warn("wlr-foreign-toplevel", e),
+        if senses.windows {
+            if let Err(e) = globals.bind::<ZwlrForeignToplevelManagerV1, _, _>(qh, 1..=3, ()) {
+                warn("wlr-foreign-toplevel", e);
+            }
         }
-        match globals.bind::<ExtWorkspaceManagerV1, _, _>(qh, 1..=1, ()) {
-            Ok(_) => {}
-            Err(e) => warn("ext-workspace", e),
+        if senses.workspaces {
+            if let Err(e) = globals.bind::<ExtWorkspaceManagerV1, _, _>(qh, 1..=1, ()) {
+                warn("ext-workspace", e);
+            }
         }
-        match globals.bind::<ExtIdleNotifierV1, _, _>(qh, 1..=1, ()) {
-            // The seat arrives on a later roundtrip, so `arm_idle` finishes the wiring.
-            Ok(notifier) => me.idle_notifier = Some(notifier),
-            Err(e) => warn("ext-idle-notify", e),
+        if senses.idle {
+            match globals.bind::<ExtIdleNotifierV1, _, _>(qh, 1..=1, ()) {
+                // The seat arrives on a later roundtrip, so `arm_idle` finishes the wiring.
+                Ok(notifier) => me.idle_notifier = Some(notifier),
+                Err(e) => warn("ext-idle-notify", e),
+            }
         }
         me
+    }
+
+    /// `app_id — title` of whatever holds focus, for the model's framing line.
+    pub fn focused_title(&self) -> Option<String> {
+        let t = self.toplevels.get(&self.focused?)?;
+        Some(if t.title.is_empty() {
+            t.app_id.clone()
+        } else {
+            format!("{} — {}", t.app_id, super::clip(&t.title, 60))
+        })
+    }
+
+    pub fn workspace_name(&self) -> Option<String> {
+        self.workspaces.get(&self.active_workspace?).cloned()
     }
 
     fn focus_changed(&mut self, id: u32) {
@@ -86,7 +107,7 @@ impl Sensors {
     pub fn arm_idle(&mut self, seat: &wayland_client::protocol::wl_seat::WlSeat, qh: &QueueHandle<App>) {
         if let Some(n) = self.idle_notifier.as_ref() {
             if self.idle_notification.is_none() {
-                self.idle_notification = Some(n.get_idle_notification(AWAY_AFTER, seat, qh, ()));
+                self.idle_notification = Some(n.get_idle_notification(self.away_after_ms, seat, qh, ()));
             }
         }
     }

@@ -116,15 +116,122 @@ impl Bounds {
     }
 }
 
-/// Locomotion state that is not a facial parameter — a Live2D adapter turns it into motion
-/// selection, a VRM adapter into a blend-tree weight, the graybox into a leg swing.
+/// Passing facial weather. The mind picks from this list; the adapter decides how to show it.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub enum Emotion {
+    #[default]
+    Neutral,
+    Curious,
+    Pleased,
+    Amused,
+    Surprised,
+    Concerned,
+    Bored,
+    Sleepy,
+}
+
+impl Emotion {
+    pub const NAMES: [&'static str; 8] = [
+        "neutral", "curious", "pleased", "amused", "surprised", "concerned", "bored", "sleepy",
+    ];
+
+    pub fn from_name(s: &str) -> Option<Self> {
+        use Emotion::*;
+        Some(match s {
+            "neutral" => Neutral,
+            "curious" => Curious,
+            "pleased" => Pleased,
+            "amused" => Amused,
+            "surprised" => Surprised,
+            "concerned" => Concerned,
+            "bored" => Bored,
+            "sleepy" => Sleepy,
+            _ => return None,
+        })
+    }
+
+    pub fn name(self) -> &'static str {
+        Self::NAMES[self as usize]
+    }
+
+    /// Parameter targets at full intensity. Anything unlisted eases back to rest.
+    pub fn targets(self) -> &'static [(Param, f32)] {
+        use Emotion::*;
+        use Param::*;
+        match self {
+            Neutral => &[],
+            Curious => &[(BrowL, 0.7), (BrowR, 0.4), (HeadRoll, 0.16), (MouthForm, 0.2)],
+            Pleased => &[(Joy, 0.8), (MouthForm, 0.8), (BrowL, 0.3), (BrowR, 0.3)],
+            Amused => &[(Fun, 0.9), (MouthOpen, 0.4), (MouthForm, 0.9), (HeadPitch, -0.15)],
+            Surprised => &[(Surprise, 1.0), (MouthOpen, 0.7), (BrowL, 1.0), (BrowR, 1.0)],
+            Concerned => &[(Sorrow, 0.6), (BrowL, -0.6), (BrowR, -0.6), (MouthForm, -0.5)],
+            Bored => &[(BrowL, -0.3), (BrowR, -0.3), (EyeOpenL, 0.55), (EyeOpenR, 0.55), (HeadPitch, 0.2)],
+            Sleepy => &[(EyeOpenL, 0.2), (EyeOpenR, 0.2), (HeadPitch, 0.4), (HeadRoll, 0.22)],
+        }
+    }
+}
+
+/// A deliberate whole-body movement. Slower and far more visible than a reaction.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Gesture {
+    Wave,
+    Nod,
+    Shake,
+    Shrug,
+    Point,
+    Stretch,
+    Bounce,
+    Slump,
+}
+
+impl Gesture {
+    pub const NAMES: [&'static str; 8] =
+        ["wave", "nod", "shake", "shrug", "point", "stretch", "bounce", "slump"];
+
+    pub fn from_name(s: &str) -> Option<Self> {
+        use Gesture::*;
+        Some(match s {
+            "wave" => Wave,
+            "nod" => Nod,
+            "shake" => Shake,
+            "shrug" => Shrug,
+            "point" => Point,
+            "stretch" => Stretch,
+            "bounce" => Bounce,
+            "slump" => Slump,
+            _ => return None,
+        })
+    }
+
+    pub fn name(self) -> &'static str {
+        Self::NAMES[self as usize]
+    }
+
+    pub fn duration(self) -> f32 {
+        use Gesture::*;
+        match self {
+            Wave | Point => 1.8,
+            Nod | Shake => 1.2,
+            Shrug | Bounce => 1.4,
+            Stretch => 2.4,
+            Slump => 2.0,
+        }
+    }
+}
+
+/// Body state that is not a facial parameter — a Live2D adapter turns it into motion selection, a
+/// VRM adapter into a blend-tree weight, the graybox into limb offsets.
 #[derive(Clone, Debug, Default)]
 pub struct Drive {
-    /// Ground speed in pixels per second.
+    /// Speed through the air in pixels per second.
     pub speed: f32,
-    /// Walk-cycle phase in radians, continuous across stops.
-    pub step_phase: f32,
-    pub airborne: bool,
+    /// Direction of travel, unit-ish.
+    pub heading: [f32; 2],
+    /// Float-cycle phase in radians, continuous.
+    pub bob_phase: f32,
+    /// Gesture in flight, with its progress from 0 to 1.
+    pub gesture: Option<(Gesture, f32)>,
+    pub speaking: bool,
 }
 
 /// One adapter per rendering technology. Live2D and VRM implement this over the same `Pose`.
@@ -133,6 +240,11 @@ pub trait Avatar {
 
     /// Advance internal animation (physics, motion playback) — never reads the world.
     fn advance(&mut self, pose: &Pose, drive: &Drive, dt: f32);
+
+    /// The emotions this adapter can show. The mind is offered exactly this list.
+    fn emotions(&self) -> &'static [&'static str] {
+        &Emotion::NAMES
+    }
 
     /// Emit geometry. `origin` is the character's ground point in surface pixels, `facing` is
     /// -1.0 (left) to 1.0 (right), `scale` is pixels per rig unit.

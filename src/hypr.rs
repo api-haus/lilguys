@@ -36,6 +36,35 @@ impl Hypr {
         Ok((x.trim().parse()?, y.trim().parse()?))
     }
 
+    /// Rect and a readable name for the first mapped window matching `needle` in class or title.
+    /// No Wayland protocol exposes another window's geometry, so this is the only route.
+    pub fn window_rect(&self, needle: &str) -> Option<([f32; 4], String)> {
+        let raw = self.request("j/clients").ok()?;
+        let clients: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let needle = needle.to_lowercase();
+        clients.as_array()?.iter().find_map(|c| {
+            if !c.get("mapped")?.as_bool()? {
+                return None;
+            }
+            let class = c.get("class")?.as_str()?;
+            let title = c.get("title")?.as_str()?;
+            if !class.to_lowercase().contains(&needle) && !title.to_lowercase().contains(&needle) {
+                return None;
+            }
+            let at = c.get("at")?.as_array()?;
+            let size = c.get("size")?.as_array()?;
+            Some((
+                [
+                    at[0].as_f64()? as f32,
+                    at[1].as_f64()? as f32,
+                    size[0].as_f64()? as f32,
+                    size[1].as_f64()? as f32,
+                ],
+                if class.is_empty() { title.to_string() } else { class.to_string() },
+            ))
+        })
+    }
+
     /// Non-blocking line stream of compositor events (`workspace>>2`, `activewindow>>class,title`).
     pub fn events(&self) -> Result<EventStream> {
         let sock = UnixStream::connect(&self.events)?;

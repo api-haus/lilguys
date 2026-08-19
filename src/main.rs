@@ -3,15 +3,22 @@
 mod app;
 mod attention;
 mod avatar;
+mod config;
 mod gpu;
 mod hypr;
 mod locomotion;
+mod mind;
 mod sensors;
+mod voice;
 
 use anyhow::{Context, Result};
 use app::App;
-use calloop::{timer::{TimeoutAction, Timer}, EventLoop};
+use calloop::{
+    timer::{TimeoutAction, Timer},
+    EventLoop,
+};
 use calloop_wayland_source::WaylandSource;
+use config::Config;
 use gpu::painter::Painter;
 use hypr::Hypr;
 use smithay_client_toolkit::{
@@ -30,6 +37,24 @@ use wayland_client::{globals::registry_queue_init, Connection};
 const FONT: &str = "/usr/share/fonts/noto/NotoSansMono-Regular.ttf";
 
 fn main() -> Result<()> {
+    match std::env::args().nth(1).as_deref() {
+        Some("--print-config") => {
+            print!("{}", config::DEFAULT_TOML);
+            return Ok(());
+        }
+        Some("--check") => return check(),
+        Some(other) => anyhow::bail!("unknown argument {other}; try --check or --print-config"),
+        None => {}
+    }
+
+    let (cfg, from) = Config::load()?;
+    match from.as_ref() {
+        Some(p) => eprintln!("config: {}", p.display()),
+        None => eprintln!("config: built-in defaults; `lilguysd --print-config` writes a starting point"),
+    }
+    let config_dir = from.as_deref().and_then(|p| p.parent()).map(|p| p.to_path_buf());
+    let persona = cfg.buddy.persona_text(config_dir.as_deref());
+
     let conn = Connection::connect_to_env().context("no wayland display")?;
     let (globals, event_queue) = registry_queue_init(&conn)?;
     let qh = event_queue.handle();
@@ -51,7 +76,30 @@ fn main() -> Result<()> {
     }
     layer.commit();
 
+    let mut event_loop: EventLoop<App> = EventLoop::try_new()?;
+    let handle = event_loop.handle();
+
+    let (voice_tx, voice_rx) = calloop::channel::channel();
+    let (mind_tx, mind_rx) = calloop::channel::channel();
+    let (sense_tx, sense_rx) = calloop::channel::channel();
+
+    let voice = voice::Voice::new(&cfg.voice, voice_tx);
+    let to_mind = match cfg.mind.enabled {
+        true => match mind::spawn(&cfg, persona, mind_tx) {
+            Ok(tx) => Some(tx),
+            Err(e) => {
+                eprintln!("mind disabled: {e:#}");
+                None
+            }
+        },
+        false => None,
+    };
+    if cfg.senses.media {
+        sensors::mpris::spawn(sense_tx);
+    }
+
     let font = std::fs::read(FONT).with_context(|| format!("read font {FONT}"))?;
+    let sensors = sensors::wayland::Sensors::bind(&globals, &qh, &cfg.senses);
     let mut app = App::new(
         RegistryState::new(&globals),
         SeatState::new(&globals, &qh),
@@ -61,23 +109,37 @@ fn main() -> Result<()> {
         Painter::new(&font)?,
         Hypr::from_env()?,
         conn.clone(),
-        sensors::wayland::Sensors::bind(&globals, &qh),
+        sensors,
+        cfg,
+        voice,
+        to_mind,
     );
 
-    let mut event_loop: EventLoop<App> = EventLoop::try_new()?;
-    let handle = event_loop.handle();
     WaylandSource::new(conn, event_queue).insert(handle.clone())?;
-
-    let (tx, rx) = calloop::channel::channel();
-    sensors::mpris::spawn(tx);
     handle
-        .insert_source(rx, |event, _, app: &mut App| {
+        .insert_source(sense_rx, |event, _, app: &mut App| {
             if let calloop::channel::Event::Msg(o) = event {
                 app.sensors.bus.push(o);
             }
         })
-        .map_err(|e| anyhow::anyhow!("mpris channel: {e}"))?;
-
+        .map_err(|e| anyhow::anyhow!("sense channel: {e}"))?;
+    handle
+        .insert_source(mind_rx, |event, _, app: &mut App| {
+            if let calloop::channel::Event::Msg(r) = event {
+                app.enact(r);
+            }
+        })
+        .map_err(|e| anyhow::anyhow!("mind channel: {e}"))?;
+    handle
+        .insert_source(voice_rx, |event, _, app: &mut App| {
+            if let calloop::channel::Event::Msg(state) = event {
+                app.body.speaking = state == voice::State::Speaking;
+                if state == voice::State::Silent {
+                    app.voice.finished_one();
+                }
+            }
+        })
+        .map_err(|e| anyhow::anyhow!("voice channel: {e}"))?;
     handle
         .insert_source(Timer::immediate(), |_, _, app: &mut App| {
             app.tick();
@@ -89,4 +151,64 @@ fn main() -> Result<()> {
         event_loop.dispatch(Duration::from_millis(50), &mut app)?;
     }
     Ok(())
+}
+
+/// Validates the config and the provider without opening a surface, so a broken setup is one
+/// command away from a diagnosis.
+fn check() -> Result<()> {
+    let (cfg, from) = Config::load()?;
+    println!("config     {}", from.map(|p| p.display().to_string()).unwrap_or("(defaults)".into()));
+    println!("buddy      {} · skin {} · {:.0}px", cfg.buddy.name, cfg.buddy.skin, cfg.buddy.size);
+
+    let provider = cfg.provider()?;
+    println!("provider   {} · {} · {}", cfg.mind.provider, provider.url, provider.model);
+    if cfg.mind.enabled {
+        match mind::probe(&cfg) {
+            Ok(p) if p.native_tools => println!("           reachable · native tool calls · called {}", p.detail),
+            Ok(p) => println!(
+                "           reachable but NO NATIVE TOOL CALLS — {}\n           \
+                 pick a model that supports tool calling; lilguys does not parse calls out of text",
+                p.detail
+            ),
+            Err(e) => println!("           UNREACHABLE: {e:#}"),
+        }
+    } else {
+        println!("           [mind] enabled = false");
+    }
+
+    match cfg.voice.enabled {
+        false => println!("voice      disabled"),
+        true => match cfg.voice.engines.get(&cfg.voice.engine) {
+            None => println!("voice      MISSING [voice.engines.{}]", cfg.voice.engine),
+            Some(e) if e.synth.is_empty() => {
+                println!("voice      {} has no synth command", cfg.voice.engine)
+            }
+            Some(e) => println!(
+                "voice      {} · {} · {} {}",
+                cfg.voice.engine,
+                cfg.voice.voice,
+                e.synth[0],
+                if which(&e.synth[0]) { "found" } else { "NOT ON PATH" }
+            ),
+        },
+    }
+
+    println!(
+        "senses     windows={} workspaces={} media={} idle={}",
+        cfg.senses.windows, cfg.senses.workspaces, cfg.senses.media, cfg.senses.idle
+    );
+    println!(
+        "quantum    {:?} awake · {:?} away · {} turns/hour",
+        cfg.mind.quantum, cfg.mind.idle_quantum, cfg.mind.turns_per_hour
+    );
+    Ok(())
+}
+
+fn which(bin: &str) -> bool {
+    if bin.contains('/') {
+        return std::path::Path::new(bin).exists();
+    }
+    std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).any(|d| d.join(bin).exists()))
+        .unwrap_or(false)
 }
