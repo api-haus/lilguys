@@ -16,6 +16,8 @@ pub struct Config {
     pub voice: Voice,
     pub senses: Senses,
     pub motion: Motion,
+    pub debug: Debug,
+    pub log: Logging,
     pub providers: BTreeMap<String, Provider>,
 }
 
@@ -203,6 +205,29 @@ pub struct Senses {
     /// Repeats of the same observation inside this window are dropped.
     #[serde(with = "humantime_serde")]
     pub novelty_window: Duration,
+}
+
+/// Where the turn-by-turn record goes. On by default — a buddy that misbehaves silently is
+/// undiagnosable, and the volume is a few lines an hour.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Logging {
+    pub enabled: bool,
+    /// Defaults to `$XDG_STATE_HOME/lilguys`.
+    #[serde(default)]
+    pub dir: Option<PathBuf>,
+}
+
+/// Grayboxing aids. All off by default — this is what he looks like, not scaffolding.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Debug {
+    /// The readouts panel beside him and the senses panel in the corner.
+    pub hud: bool,
+    /// Joint dots, part labels, the bounds frame and the gaze ray.
+    pub rig: bool,
+    /// Awareness radius rings and the line to the pointer.
+    pub radii: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

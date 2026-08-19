@@ -19,5 +19,8 @@ The model must support **native tool calls**; lilguys does not parse calls out o
   adapters; the attention economy; how this attaches to hermes.
 - [QA](docs/qa-graybox.md) — five manual checks, about three minutes.
 
-Debug output: `LILGUYS_DEBUG_INPUT=1` prints the input rectangle, `LILGUYS_DEBUG_MPRIS=1` prints
-every D-Bus media signal and the fields extracted from it.
+Logs land in `~/.local/state/lilguys/`: `turns.jsonl` is every model turn verbatim — slice sent,
+raw reply, intents parsed, calls rejected and why — and `events.jsonl` is every gate ruling.
+
+Grayboxing aids are off by default; turn them on per-kind under `[debug]`. `LILGUYS_DEBUG_INPUT=1`
+prints the input rectangle and `LILGUYS_DEBUG_MPRIS=1` prints every D-Bus media signal.

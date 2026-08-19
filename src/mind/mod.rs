@@ -4,9 +4,11 @@ pub mod capability;
 pub mod provider;
 
 use crate::config::{Config, Mind as MindConfig};
+use crate::log;
 use anyhow::Result;
 use capability::Intent;
 use provider::{Client, Message};
+use serde_json::json;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -47,6 +49,8 @@ impl Quantum {
 #[derive(Clone, Debug)]
 pub struct Reaction {
     pub intents: Vec<Intent>,
+    /// Calls the model made that were refused, with the reason. Empty is the healthy case.
+    pub rejected: Vec<String>,
     pub note: Option<String>,
     pub tokens: usize,
     pub compacted: bool,
@@ -137,6 +141,7 @@ impl Reactor {
     fn turn(&mut self, q: Quantum) -> Reaction {
         let mut reaction = Reaction {
             intents: Vec::new(),
+            rejected: Vec::new(),
             note: None,
             tokens: self.tokens(),
             compacted: false,
@@ -151,21 +156,29 @@ impl Reactor {
         }
 
         reaction.compacted = self.compact_if_needed();
-        self.history.push(Message::user(q.render()));
+        let prompt = q.render();
+        self.history.push(Message::user(prompt.clone()));
 
+        let started = Instant::now();
         let reply = match self.client.chat(&self.messages(), &capability::schemas()) {
             Ok(m) => m,
             Err(e) => {
                 // Drop the prompt again so a dead endpoint cannot inflate the window forever.
                 self.history.pop();
                 reaction.error = Some(format!("{e:#}"));
+                log::turn(&prompt, "", &json!(null), &[], &[], self.tokens(), reaction.compacted,
+                          reaction.error.as_deref(), started.elapsed().as_millis());
                 return reaction;
             }
         };
+        let elapsed = started.elapsed().as_millis();
 
+        let mut rejected = Vec::new();
         for call in reply.tool_calls.iter().flatten() {
-            if let Some(intent) = capability::parse(&call.function.name, &call.function.arguments) {
-                reaction.intents.push(intent);
+            match capability::parse(&call.function.name, &call.function.arguments) {
+                Ok(intent) => reaction.intents.push(intent),
+                Err(why) => rejected.push(format!("{}({}) — {why}", call.function.name,
+                                                  crate::sensors::clip(&call.function.arguments, 60))),
             }
         }
         let text = reply.content.clone().unwrap_or_default();
@@ -176,6 +189,22 @@ impl Reactor {
         if reply.tool_calls.is_none() && text.contains('(') && text.contains(')') {
             reaction.error = Some("model wrote calls as text; it cannot do native tool calls".into());
         }
+        if !rejected.is_empty() {
+            reaction.error.get_or_insert_with(|| format!("rejected {} call(s)", rejected.len()));
+        }
+        reaction.rejected = rejected.clone();
+
+        log::turn(
+            &prompt,
+            &text,
+            &serde_json::to_value(&reply.tool_calls).unwrap_or(json!(null)),
+            &reaction.intents.iter().map(Intent::summary).collect::<Vec<_>>(),
+            &rejected,
+            self.tokens(),
+            reaction.compacted,
+            reaction.error.as_deref(),
+            elapsed,
+        );
 
         let calls = reply.tool_calls.clone().unwrap_or_default();
         self.history.push(reply);

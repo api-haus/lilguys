@@ -100,25 +100,24 @@ sequenceDiagram
     participant M as reactor
     participant B as body
 
-    S->>G: focus zen — "…Terrible Book"
-    G->>G: unseen → start 90s dwell
+    S->>G: focus zen, a video essay
+    G->>G: unseen, start 90s dwell
     S->>G: focus ghostty
-    G->>G: seen 20s ago → discard
-    S->>G: playing "Like Stories of Old"
-    G->>G: unseen → start 60s dwell
+    G->>G: seen 20s ago, discard
+    S->>G: playing Like Stories of Old
+    G->>G: unseen, start 60s dwell
 
-    Note over G: dwell elapses; both survive
+    Note over G: dwell elapses, both survive
     G->>Q: append 2 lines
-    G->>B: small local emote (curious)
-
-    Note over Q: quantum still open — nothing sent
+    G->>B: reflex arc, curious
+    Note over Q: quantum still open, nothing sent
 
     Note over Q,M: 45s boundary, bucket non-empty
-    Q->>M: Quantum{events, focused, workspace, present}
+    Q->>M: one slice plus framing state
     M->>M: compact if over context_tokens
     M->>M: one chat completion, four tools offered
-    M-->>B: react(curious, 0.6) · focus(window "zen")
-    Note over M,B: no speak — silence is the default
+    M-->>B: react curious 0.6, then focus window zen
+    Note over M,B: no speak, silence is the default
 ```
 
 The framing line at the top of every slice carries state rather than events: how long the window
@@ -284,14 +283,20 @@ classDiagram
         +hit(local) bool
     }
     class Pose {
-        20 named parameters
-        head_yaw, gaze_x, eye_open_l,
-        mouth_open, breath, joy, …
+        +f32 head_yaw
+        +f32 gaze_x
+        +f32 eye_open_l
+        +f32 mouth_open
+        +f32 breath
+        +f32 joy
+        20 parameters in total
     }
     class Drive {
-        speed, heading, bob_phase
-        gesture(kind, 0..1)
-        speaking
+        +f32 speed
+        +heading
+        +f32 bob_phase
+        +gesture kind and progress
+        +bool speaking
     }
     Avatar <|.. Graybox
     Avatar <|.. Live2D : planned
@@ -345,7 +350,28 @@ Every thread that can block owns a channel into the calloop event loop and nothi
 thread never waits on D-Bus, HTTP, or a subprocess, which is why a dead endpoint or a missing TTS
 binary degrades one sense instead of freezing the character.
 
-## 11. Configuration
+## 11. Logs
+
+`$XDG_STATE_HOME/lilguys/` holds two append-only JSONL files, on by default.
+
+- **`turns.jsonl`** — one object per model turn: the slice sent verbatim, the raw `content`, the raw
+  `tool_calls`, the intents parsed out, the calls **rejected** and why, token estimate, whether the
+  window compacted, the error if any, and the round-trip in milliseconds.
+- **`events.jsonl`** — one object per gate ruling, with its verdict, so what was discarded is as
+  visible as what survived.
+
+Everything the model says is recorded before it is acted on, which is what makes misbehaviour
+diagnosable rather than anecdotal.
+
+### 11.1 Vetting speech
+
+`speak` is the only capability that reaches the user directly, so it is the only one vetted. An
+utterance is refused when it runs past 25 words, contains markup characters, or carries the tells
+of a leaked prompt. Small models do leak their tool-calling preamble into `speak` — a real one
+began "Given the following functions, please respond with a JSON…" and was spoken aloud before this
+existed. A refusal is logged with its reason and shown as `[x] refused` rather than swallowed.
+
+## 12. Configuration
 
 One TOML file, `~/.config/lilguys/lilguys.toml`, naming nothing internal. A partial file is merged
 onto the bundled defaults, so it need only contain what differs.
@@ -358,7 +384,7 @@ Providers are interchangeable because every one speaks the OpenAI chat-completio
 llama.cpp's server, ollama, vLLM, LM Studio, OpenRouter, OpenAI. Switching between local and hosted
 is a `provider = ` line. API keys are named by environment variable and never live in the file.
 
-## 12. Not yet built
+## 13. Not yet built
 
 - **Memory.** Deferred by decision. The reactor's private notes are the seed for it.
 - **hermes link.** Clicking the character opens a channel adapter; ambient observations become a

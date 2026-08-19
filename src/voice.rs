@@ -80,9 +80,15 @@ impl Voice {
 fn utter(engine: &Engine, config: &VoiceConfig, text: &str) -> Result<()> {
     let out = std::env::temp_dir().join(format!("lilguys-{}.wav", std::process::id()));
     let out_str = out.to_string_lossy().to_string();
+    // A model path in a config file is written with a tilde; exec never expands one.
+    let voice = match config.voice.strip_prefix("~/") {
+        Some(rest) => dirs::home_dir().map(|h| h.join(rest).to_string_lossy().into_owned()),
+        None => None,
+    }
+    .unwrap_or_else(|| config.voice.clone());
     let subst = |arg: &String| -> String {
         arg.replace("{text}", text)
-            .replace("{voice}", &config.voice)
+            .replace("{voice}", &voice)
             .replace("{speed}", &format!("{:.2}", 1.0 / config.speed.max(0.05)))
             .replace("{out}", &out_str)
     };

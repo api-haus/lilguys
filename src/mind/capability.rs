@@ -107,40 +107,72 @@ fn default_linger() -> f32 {
     20.0
 }
 
-/// Parses one tool call. An unknown name or malformed arguments yields `None` rather than an
-/// error — a small local model will get this wrong sometimes, and that is not a reason to stop.
-pub fn parse(name: &str, arguments: &str) -> Option<Intent> {
+/// Words above which an utterance is prompt leakage rather than a remark.
+const SPEAK_WORD_CAP: usize = 25;
+
+/// Rejects an utterance that is structurally not a remark. Small models leak their tool-calling
+/// preamble into `speak`, and the user hears it; length and JSON debris catch every case seen.
+fn vet_speech(text: &str) -> Result<String, String> {
+    let text = text.trim().trim_matches('"').trim().to_string();
+    if text.is_empty() {
+        return Err("empty".into());
+    }
+    let words = text.split_whitespace().count();
+    if words > SPEAK_WORD_CAP {
+        return Err(format!("{words} words, cap is {SPEAK_WORD_CAP}"));
+    }
+    for debris in ['{', '}', '[', ']', '<', '>'] {
+        if text.contains(debris) {
+            return Err(format!("contains {debris:?}, looks like markup not speech"));
+        }
+    }
+    let lower = text.to_lowercase();
+    for tell in ["given the following", "\"name\"", "arguments", "parameters", "json schema"] {
+        if lower.contains(tell) {
+            return Err(format!("contains {tell:?}, looks like prompt leakage"));
+        }
+    }
+    Ok(text)
+}
+
+/// Parses one tool call. A malformed call is reported rather than dropped, so the log says why.
+pub fn parse(name: &str, arguments: &str) -> Result<Intent, String> {
     let args = if arguments.trim().is_empty() { "{}" } else { arguments };
     match name {
         "react" => {
-            let a: ReactArgs = serde_json::from_str(args).ok()?;
-            Some(Intent::React {
-                emotion: Emotion::from_name(&a.emotion)?,
+            let a: ReactArgs = serde_json::from_str(args).map_err(|e| e.to_string())?;
+            let emotion = Emotion::from_name(&a.emotion)
+                .ok_or_else(|| format!("unknown emotion {:?}", a.emotion))?;
+            Ok(Intent::React {
+                emotion,
                 intensity: a.intensity.clamp(0.0, 1.0),
                 hold: a.hold.clamp(1.0, 60.0),
             })
         }
         "gesture" => {
-            let a: GestureArgs = serde_json::from_str(args).ok()?;
-            Some(Intent::Gesture { gesture: Gesture::from_name(&a.gesture)? })
+            let a: GestureArgs = serde_json::from_str(args).map_err(|e| e.to_string())?;
+            let gesture = Gesture::from_name(&a.gesture)
+                .ok_or_else(|| format!("unknown gesture {:?}", a.gesture))?;
+            Ok(Intent::Gesture { gesture })
         }
         "speak" => {
-            let a: SpeakArgs = serde_json::from_str(args).ok()?;
-            let text = a.text.trim().to_string();
-            (!text.is_empty()).then_some(Intent::Speak { text })
+            let a: SpeakArgs = serde_json::from_str(args).map_err(|e| e.to_string())?;
+            Ok(Intent::Speak { text: vet_speech(&a.text)? })
         }
         "focus" => {
-            let a: FocusArgs = serde_json::from_str(args).ok()?;
+            let a: FocusArgs = serde_json::from_str(args).map_err(|e| e.to_string())?;
             let target = match a.target.as_str() {
-                "window" => FocusTarget::Window { r#match: a.r#match? },
+                "window" => FocusTarget::Window {
+                    r#match: a.r#match.ok_or("target=window needs a match")?,
+                },
                 "pointer" => FocusTarget::Pointer,
-                "place" => FocusTarget::Place { where_: a.place? },
+                "place" => FocusTarget::Place { where_: a.place.ok_or("target=place needs a place")? },
                 "away" => FocusTarget::Away,
-                _ => return None,
+                other => return Err(format!("unknown target {other:?}")),
             };
-            Some(Intent::Focus { target, linger: a.linger.clamp(2.0, 600.0) })
+            Ok(Intent::Focus { target, linger: a.linger.clamp(2.0, 600.0) })
         }
-        _ => None,
+        other => Err(format!("unknown tool {other:?}")),
     }
 }
 
@@ -195,4 +227,39 @@ fn tool(name: &str, description: &str, parameters: Value) -> Value {
         "type": "function",
         "function": { "name": name, "description": description, "parameters": parameters }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn speech_rejects_prompt_leakage() {
+        // The exact shape a small model leaked into `speak` in the wild.
+        let leak = "Given the following functions, please respond with a JSON for a function \
+                    call with its proper arguments that best answers the given prompt.";
+        assert!(parse("speak", &format!(r#"{{"text": "{leak}"}}"#)).is_err());
+    }
+
+    #[test]
+    fn speech_rejects_markup_and_rambling() {
+        assert!(parse("speak", r#"{"text": "{\"name\": \"react\"}"}"#).is_err());
+        let long = vec!["word"; SPEAK_WORD_CAP + 1].join(" ");
+        assert!(parse("speak", &format!(r#"{{"text": "{long}"}}"#)).is_err());
+        assert!(parse("speak", r#"{"text": "   "}"#).is_err());
+    }
+
+    #[test]
+    fn speech_accepts_a_remark() {
+        let ok = parse("speak", r#"{"text": "  \"that video is long\"  "}"#).unwrap();
+        assert_eq!(ok, Intent::Speak { text: "that video is long".into() });
+    }
+
+    #[test]
+    fn unknown_names_are_reported_not_dropped() {
+        assert!(parse("react", r#"{"emotion": "smug"}"#).is_err());
+        assert!(parse("gesture", r#"{"gesture": "moonwalk"}"#).is_err());
+        assert!(parse("focus", r#"{"target": "window"}"#).is_err());
+        assert!(parse("teleport", "{}").is_err());
+    }
 }

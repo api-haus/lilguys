@@ -97,6 +97,7 @@ impl App {
     ) -> Self {
         let motion = config.motion.clone();
         let size = config.buddy.size;
+        let debug = config.debug.clone();
         Self {
             registry_state,
             seat_state,
@@ -123,7 +124,7 @@ impl App {
             pointer: None,
             hover: false,
             press_origin: None,
-            avatar: Box::new(Graybox::default()),
+            avatar: Box::new(Graybox::annotated(debug.rig)),
             pose: Pose::default(),
             body: Body::new(motion, size, [1.0, 1.0]),
             last_tick: Instant::now(),
@@ -132,7 +133,7 @@ impl App {
             fps: 0.0,
             fps_window: Instant::now(),
             input_region: None,
-            show_hud: true,
+            show_hud: debug.hud,
         }
     }
 
@@ -206,6 +207,7 @@ impl App {
             }
             for e in self.attention.log.iter().take(self.attention.fresh()) {
                 println!("[{}] {}", e.verdict.tag(), e.text);
+                crate::log::event(e.verdict.tag(), &e.text);
             }
         }
 
@@ -241,6 +243,9 @@ impl App {
                     }
                 }
             }
+        }
+        for why in &reaction.rejected {
+            println!("[x] refused {why}");
         }
         if let Some(note) = reaction.note.as_deref() {
             println!("[.] note: {}", crate::sensors::clip(note, 70));
@@ -294,7 +299,8 @@ impl App {
         self.painter.clear();
         let origin = self.body.pos;
         let (facing, scale) = (self.body.facing, self.scale());
-        let avatar = std::mem::replace(&mut self.avatar, Box::new(Graybox::default()));
+        let avatar =
+            std::mem::replace(&mut self.avatar, Box::new(Graybox::annotated(self.config.debug.rig)));
         avatar.draw(&mut self.painter, origin, facing, scale);
         self.avatar = avatar;
         if self.show_hud {
@@ -311,14 +317,18 @@ impl App {
 
         // Awareness radii, so a tuning change is visible instead of felt.
         let eye_y = origin[1] - self.config.buddy.size * 0.28;
-        for (r, c) in [
+        for (r, c) in if self.config.debug.radii { [
             (t.personal_space, rgba(226, 86, 90, 0.30)),
             (t.notice_radius, rgba(104, 168, 128, 0.22)),
             (t.forget_radius, rgba(96, 124, 176, 0.18)),
-        ] {
-            ring(&mut self.painter, origin[0], eye_y, r, c);
+        ] } else { [(0.0, [0.0; 4]); 3] } {
+            if r > 0.0 {
+                ring(&mut self.painter, origin[0], eye_y, r, c);
+            }
         }
-        self.painter.line([origin[0], eye_y], cursor, 1.0, rgba(250, 214, 82, 0.35));
+        if self.config.debug.radii {
+            self.painter.line([origin[0], eye_y], cursor, 1.0, rgba(250, 214, 82, 0.35));
+        }
 
         let (x, mut y) = (origin[0] + 150.0, origin[1] - self.config.buddy.size * 0.95);
         let line_h = 15.0;

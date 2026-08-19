@@ -58,8 +58,10 @@ queue_limit = 2
 
 # A TTS pipeline is a command line. `{text}` `{voice}` `{speed}` `{out}` are substituted; `{out}`
 # is a temporary wav path. Text goes on stdin when `{text}` does not appear in the arguments.
+# piper 1.7+ (`uv tool install piper-tts`). `voice` is the path to a .onnx model; download one
+# from https://huggingface.co/rhasspy/piper-voices. Text arrives on stdin.
 [voice.engines.piper]
-synth = ["piper", "--model", "{voice}", "--length-scale", "{speed}", "--output_file", "{out}"]
+synth = ["piper", "-m", "{voice}", "--length-scale", "{speed}", "-f", "{out}"]
 play = ["pw-play", "{out}"]
 
 [voice.engines.espeak]
@@ -87,6 +89,18 @@ away_after = "90s"
 focus_dwell = "90s"
 media_dwell = "60s"
 novelty_window = "10m"
+
+# turns.jsonl records every model turn verbatim: the slice sent, the raw reply, what was parsed
+# out of it and what was rejected. events.jsonl records every gate ruling.
+[log]
+enabled = true
+# dir = "~/.local/state/lilguys"
+
+# Grayboxing aids. All off by default: this is what he looks like, not scaffolding.
+[debug]
+hud = false
+rig = false
+radii = false
 
 [motion]
 speed = 190.0

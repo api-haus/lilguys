@@ -22,7 +22,13 @@ pub struct Graybox {
 
 impl Default for Graybox {
     fn default() -> Self {
-        Self { pose: Pose::default(), drive: Drive::default(), annotate: true }
+        Self { pose: Pose::default(), drive: Drive::default(), annotate: false }
+    }
+}
+
+impl Graybox {
+    pub fn annotated(annotate: bool) -> Self {
+        Self { annotate, ..Default::default() }
     }
 }
 

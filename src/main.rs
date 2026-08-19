@@ -7,6 +7,7 @@ mod config;
 mod gpu;
 mod hypr;
 mod locomotion;
+mod log;
 mod mind;
 mod sensors;
 mod voice;
@@ -51,6 +52,10 @@ fn main() -> Result<()> {
     match from.as_ref() {
         Some(p) => eprintln!("config: {}", p.display()),
         None => eprintln!("config: built-in defaults; `lilguysd --print-config` writes a starting point"),
+    }
+    match log::init(&cfg.log) {
+        Some(dir) => eprintln!("log: {}", dir.display()),
+        None => eprintln!("log: disabled"),
     }
     let config_dir = from.as_deref().and_then(|p| p.parent()).map(|p| p.to_path_buf());
     let persona = cfg.buddy.persona_text(config_dir.as_deref());
