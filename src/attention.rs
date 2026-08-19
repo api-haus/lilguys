@@ -81,8 +81,9 @@ struct Budget {
 }
 
 impl Budget {
+    /// Starts full. A buddy that has just woken up should not be at its stingiest.
     fn new(per_hour: f32) -> Self {
-        Self { per_hour, credit: 1.0, last: Instant::now() }
+        Self { per_hour, credit: (per_hour * 0.25).max(1.0), last: Instant::now() }
     }
 
     fn refill(&mut self, now: Instant) {
@@ -159,6 +160,11 @@ impl Attention {
         match what {
             // Presence and workspace changes are ambient: they colour the mood, they are never
             // worth a token on their own.
+            // A feeling is the body's own immediate feedback and costs nothing to answer. Budget
+            // exists to protect tokens; rationing a free response only makes the body feel dead.
+            Observation::Feeling(_) => Verdict::Emote,
+            // Ambient changes colour the mood too, but they arrive from outside and can flood, so
+            // they are rationed. Either way both ride along in the next slice for the mind.
             Observation::Presence { .. } | Observation::Workspace { .. } => {
                 if self.emotes.spend(now) {
                     Verdict::Emote

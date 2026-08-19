@@ -195,6 +195,9 @@ impl App {
 
     /// Drains the sensor bus through the gate, then buckets what survived for the model.
     fn sense(&mut self, now: Instant) {
+        for feeling in self.body.drain_feelings() {
+            self.sensors.bus.push(Observation::Feeling(feeling));
+        }
         let sensed = self.sensors.bus.drain();
         if !sensed.is_empty() || self.attention.waiting() > 0 {
             for (verdict, what) in self.attention.consider(sensed, now) {
@@ -214,6 +217,7 @@ impl App {
         self.quantiser.present = self.sensors.present;
         self.quantiser.focused = self.sensors.focused_title();
         self.quantiser.workspace = self.sensors.workspace_name();
+        self.quantiser.sensation = self.body.sensation();
         if let Some(tx) = self.to_mind.as_ref() {
             if let Some(q) = self.quantiser.take(&self.config.mind, now) {
                 let _ = tx.send(ToMind::Tick(q));
@@ -454,6 +458,12 @@ impl App {
 /// this layer can do while the model is unreachable is pull a face.
 fn reflex(what: &Observation) -> (Emotion, f32, f32) {
     match what {
+        // A feeling names its own tone, because only its author knows what it means.
+        Observation::Feeling(f) => (
+            f.tone.as_deref().and_then(Emotion::from_name).unwrap_or(Emotion::Curious),
+            f.intensity.clamp(0.0, 1.0),
+            f.hold.clamp(0.5, 120.0),
+        ),
         Observation::Presence { present: true } => (Emotion::Pleased, 0.55, 6.0),
         Observation::Presence { present: false } => (Emotion::Sleepy, 0.7, 30.0),
         Observation::Workspace { .. } => (Emotion::Curious, 0.30, 3.0),

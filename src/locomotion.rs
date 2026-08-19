@@ -2,6 +2,7 @@
 
 use crate::avatar::{Emotion, Gesture, Param, Pose};
 use crate::config::Motion;
+use crate::sensors::Feeling;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Drift {
@@ -63,6 +64,8 @@ pub struct Body {
     breath: f32,
     bob: f32,
     sway: f32,
+    felt: Vec<Feeling>,
+    was_offscreen: bool,
 }
 
 impl Body {
@@ -91,7 +94,42 @@ impl Body {
             breath: 0.0,
             bob: 0.0,
             sway: 0.0,
+            felt: Vec::new(),
+            was_offscreen: false,
         }
+    }
+
+    /// Interoception. The body knows things about itself the mind would otherwise never learn.
+    pub fn drain_feelings(&mut self) -> Vec<Feeling> {
+        std::mem::take(&mut self.felt)
+    }
+
+    fn feel_that(&mut self, state: &str, detail: &str, tone: &str, intensity: f32, hold: f32) {
+        self.felt.push(Feeling::own(state, detail, tone, intensity, hold));
+    }
+
+    /// One line of how it is in here, for the framing of every slice. Continuous, unlike an event.
+    pub fn sensation(&self) -> String {
+        let mood = if self.emotion_weight > 0.05 {
+            format!("{} {:.0}%", self.emotion.name(), self.emotion_weight * 100.0)
+        } else {
+            "settled".into()
+        };
+        let doing = match self.drift {
+            Drift::Held => "being held".into(),
+            Drift::Leaving => "drifting off the screen".into(),
+            Drift::Seeking => match self.target.as_ref() {
+                Some(t) => format!("on your way to {}", t.label),
+                None => "on your way somewhere".into(),
+            },
+            Drift::Lingering => match self.target.as_ref() {
+                Some(t) => format!("settled by {}", t.label),
+                None => "settled".into(),
+            },
+            Drift::Noticing => "watching the pointer".into(),
+            Drift::Idle => "drifting".into(),
+        };
+        format!("{doing}, feeling {mood}")
     }
 
     fn enter(&mut self, drift: Drift) {
@@ -159,6 +197,7 @@ impl Body {
         self.enter(Drift::Held);
         self.vel = [0.0, 0.0];
         self.target = None;
+        self.feel_that("picked up", "someone has hold of you", "surprised", 0.8, 6.0);
     }
 
     pub fn drag_to(&mut self, x: f32, y: f32) {
@@ -172,6 +211,7 @@ impl Body {
     pub fn release(&mut self) {
         if self.drift == Drift::Held {
             self.enter(Drift::Idle);
+            self.feel_that("set down", "back to your own devices", "pleased", 0.5, 8.0);
         }
     }
 
@@ -187,6 +227,14 @@ impl Body {
 
         self.decide(dt, &m);
         self.steer(dt, &m);
+        let gone = self.offscreen();
+        if gone != self.was_offscreen {
+            self.was_offscreen = gone;
+            match gone {
+                true => self.feel_that("out of sight", "nobody can see you", "neutral", 0.4, 20.0),
+                false => self.feel_that("back in view", "", "curious", 0.4, 6.0),
+            }
+        }
         self.face(dx, dt, &m);
         self.advance_gesture(dt);
         self.drive_face(dx, dy, dt, &m, pose);
@@ -206,6 +254,8 @@ impl Body {
             }
             Drift::Seeking => {
                 if self.arrived() {
+                    let where_ = self.target.as_ref().map(|t| t.label.clone()).unwrap_or_default();
+                    self.feel_that("arrived", &where_, "curious", 0.4, 6.0);
                     self.enter(Drift::Lingering);
                 } else if self.state_age > 12.0 {
                     self.target = None;
@@ -215,7 +265,8 @@ impl Body {
             Drift::Lingering => {
                 self.linger_left -= dt;
                 if self.linger_left <= 0.0 {
-                    self.target = None;
+                    let where_ = self.target.take().map(|t| t.label).unwrap_or_default();
+                    self.feel_that("done here", &where_, "bored", 0.3, 5.0);
                     self.enter(Drift::Idle);
                 }
             }

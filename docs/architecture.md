@@ -3,9 +3,10 @@
 One daemon, `lilguysd`. It draws a character on a Wayland overlay, senses what happens on the
 desktop, and lets a language model decide what the character does about it.
 
-Everything below describes what the code does today. Design rationale and the measurements behind
-these choices are in [design-space.md](design-space.md); the manual checks are in
-[qa-graybox.md](qa-graybox.md).
+Everything below describes what the code does today. **[philosophy.md](philosophy.md) says what it
+is held to** — the mind/body split, the two kinds of sensing, and the six things a change may not
+break. Measurements behind these choices are in [design-space.md](design-space.md); the manual
+checks are in [qa-graybox.md](qa-graybox.md).
 
 ## 1. The shape of it
 
@@ -60,7 +61,7 @@ the next when it has to.
 | clock | rate | cost | what it does |
 |---|---|---|---|
 | reflex | 60 Hz awake, 8 Hz idle | none | drift, gaze, blink, breathing, click, drag |
-| notice | per event | none | novelty and dwell filtering, a small local emote |
+| notice | per event | none | novelty and dwell filtering, the reflex arc |
 | think | one slice, at most | tokens | the model decides what to actually do |
 
 The reflex clock is the render tick. It drops to 8 Hz whenever the character is settled and nothing
@@ -120,9 +121,18 @@ sequenceDiagram
     Note over M,B: no speak, silence is the default
 ```
 
-The framing line at the top of every slice carries state rather than events: how long the window
-was, whether the user is present, the active workspace, the focused window. That way the model can
-tell "nothing happened because they left" from "nothing happened because they are concentrating".
+Every slice opens with two framing lines carrying **state rather than events** — how long the
+window was, whether the user is present, the active workspace, the focused window, and how the body
+currently is:
+
+```
+[45s elapsed · they are here · workspace 2 · they are looking at zen — a video essay]
+[you are settled by zen, feeling curious 60%]
+```
+
+The second line is why interoception needs more than an event stream: a feeling that never changes
+is still true, and only a framing line can say so. It also lets the model tell "nothing happened
+because they left" from "nothing happened because they are concentrating".
 
 ## 4. The attention gate
 
@@ -151,10 +161,11 @@ times produces two observations, not forty.
 
 Two paths reach `Verdict::Emote`, and both bypass the model:
 
-1. **Ambient observations** — a workspace switch or a presence change. These colour the mood but are
-   never worth a token on their own, so they are answered locally and still appear in the next
-   slice as context.
-2. **A demoted thought** — a dwell matured, but `turns_per_hour` was already spent. Rather than
+1. **A feeling** — the body's own, or a drive's through the inbox. Always answered, never rationed:
+   budget protects tokens, and an expression costs none.
+2. **Ambient observations** — a workspace switch or a presence change. These colour the mood but are
+   never worth a token on their own. They can flood, so unlike feelings they are rationed.
+3. **A demoted thought** — a dwell matured, but `turns_per_hour` was already spent. Rather than
    discard it, the verdict drops from Think to Emote so something visible still happens.
 
 The answer is a fixed mapping from observation to expression, applied directly to the body:
@@ -168,6 +179,7 @@ The answer is a fixed mapping from observation to expression, applied directly t
 | window retitled | curious 0.22 | 2.5 s |
 | playback started | amused 0.45 | 8 s |
 | playback stopped | neutral 0.20 | 3 s |
+| any feeling | whatever it named | whatever it asked |
 
 **Facial only, on purpose.** A gesture is a deliberate intention and stays the mind's to decide, so
 the worst this layer can do with the model unreachable is pull a face. It never moves him, never
@@ -182,14 +194,35 @@ worth fetching, and the gate is where that is decided.
 Each sensor is one source, and each is independently switchable in `[senses]`. None of them poll,
 and none of them look at pixels.
 
-| sensor | source | gives |
-|---|---|---|
-| windows | `zwlr_foreign_toplevel_manager_v1` | focus changes, app ids, live titles |
-| workspaces | `ext_workspace_manager_v1` | which workspace is active, switch events |
-| idle | `ext_idle_notifier_v1` | user went away, user came back |
-| media | MPRIS on D-Bus | title, artist, and **the URL** of whatever is playing |
-| pointer | Hyprland IPC | cursor position, 14.6 µs per read |
-| geometry | Hyprland IPC | window rectangles, for `focus(window)` |
+Sensing divides in two, and the division is load-bearing rather than tidy — see
+[philosophy.md](philosophy.md). **Exteroception** is the world; **interoception** is the body
+reporting on itself. Both push onto the same bus and reach the mind in the same account.
+
+| sensor | kind | source | gives |
+|---|---|---|---|
+| windows | extero | `zwlr_foreign_toplevel_manager_v1` | focus changes, app ids, live titles |
+| workspaces | extero | `ext_workspace_manager_v1` | which workspace is active, switch events |
+| idle | extero | `ext_idle_notifier_v1` | user went away, user came back |
+| media | extero | MPRIS on D-Bus | title, artist, and **the URL** of whatever is playing |
+| pointer | extero | Hyprland IPC | cursor position, 14.6 µs per read |
+| geometry | extero | Hyprland IPC | window rectangles, for `focus(window)` |
+| body | intero | `locomotion.rs` | picked up, set down, arrived, out of sight |
+| inbox | intero | `$XDG_RUNTIME_DIR/lilguys.sock` | any feeling any process cares to push |
+
+### 5.1 The inbox
+
+One JSON object per line, from anything that can open a unix socket:
+
+```json
+{"source":"hunger","state":"starving","detail":"nothing since this morning",
+ "tone":"concerned","intensity":0.9,"hold":40}
+```
+
+`tone`, `intensity` and `hold` set the immediate expression, because only the drive's author knows
+what its own signal means. A feeling is answered by the body at once and **never rationed** — it
+costs no tokens — and it still rides into the next slice for the mind to reflect on later.
+
+A feeding mechanic is therefore a script with a timer, outside this repo entirely.
 
 The Wayland sensors ride the same connection as the surface — no second socket, no second thread.
 MPRIS gets its own thread because D-Bus is blocking and a stalled bus must never stall rendering.

@@ -58,7 +58,7 @@ fn main() -> Result<()> {
         None => eprintln!("log: disabled"),
     }
     let config_dir = from.as_deref().and_then(|p| p.parent()).map(|p| p.to_path_buf());
-    let persona = cfg.buddy.persona_text(config_dir.as_deref());
+    let system = cfg.prompt.assemble(&cfg.buddy.name, config_dir.as_deref());
 
     let conn = Connection::connect_to_env().context("no wayland display")?;
     let (globals, event_queue) = registry_queue_init(&conn)?;
@@ -90,7 +90,7 @@ fn main() -> Result<()> {
 
     let voice = voice::Voice::new(&cfg.voice, voice_tx);
     let to_mind = match cfg.mind.enabled {
-        true => match mind::spawn(&cfg, persona, mind_tx) {
+        true => match mind::spawn(&cfg, system, mind_tx) {
             Ok(tx) => Some(tx),
             Err(e) => {
                 eprintln!("mind disabled: {e:#}");
@@ -100,7 +100,11 @@ fn main() -> Result<()> {
         false => None,
     };
     if cfg.senses.media {
-        sensors::mpris::spawn(sense_tx);
+        sensors::mpris::spawn(sense_tx.clone());
+    }
+    match sensors::inbox::spawn(sense_tx) {
+        Ok(path) => eprintln!("inbox: {}", path.display()),
+        Err(e) => eprintln!("inbox unavailable: {e}"),
     }
 
     let font = std::fs::read(FONT).with_context(|| format!("read font {FONT}"))?;

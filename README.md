@@ -13,6 +13,8 @@ cargo build --release
 The model must support **native tool calls**; lilguys does not parse calls out of message text.
 `--check` tells you whether yours does before you run anything.
 
+- [Philosophy](docs/philosophy.md) — the mind/body split, what it forbids, and how to add a drive.
+  Design law; read it before changing behaviour.
 - [Architecture](docs/architecture.md) — how the pieces fit, with diagrams: the three clocks, what
   quantised event flow means, the attention gate, the reactor, the four capabilities.
 - [Design space](docs/design-space.md) — what Wayland actually exposes, measured; rendering

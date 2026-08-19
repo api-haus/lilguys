@@ -21,17 +21,20 @@ pub struct Quantum {
     pub workspace: Option<String>,
     pub present: bool,
     pub since_last: Duration,
+    /// How the body is right now, not what changed. Interoception is continuous.
+    pub sensation: String,
 }
 
 impl Quantum {
     fn render(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!(
-            "[{}s elapsed · user {} · workspace {} · focused {}]\n",
+            "[{}s elapsed · they are {} · workspace {} · they are looking at {}]\n[you are {}]\n",
             self.since_last.as_secs(),
             if self.present { "here" } else { "away" },
             self.workspace.as_deref().unwrap_or("?"),
             self.focused.as_deref().unwrap_or("nothing"),
+            self.sensation,
         ));
         for e in &self.events {
             out.push_str("- ");
@@ -65,18 +68,17 @@ pub enum ToMind {
 /// Runs the model loop on its own thread. Blocking HTTP never touches the render loop.
 pub fn spawn(
     config: &Config,
-    persona: String,
+    system: String,
     out: calloop::channel::Sender<Reaction>,
 ) -> Result<mpsc::Sender<ToMind>> {
     let client = Client::new(config.provider()?.clone())?;
     let mind = config.mind.clone();
-    let name = config.buddy.name.clone();
     let (tx, rx) = mpsc::channel();
 
     std::thread::Builder::new()
         .name("mind".into())
         .spawn(move || {
-            let mut reactor = Reactor::new(client, mind, system_prompt(&name, &persona));
+            let mut reactor = Reactor::new(client, mind, system);
             while let Ok(msg) = rx.recv() {
                 let ToMind::Tick(q) = msg else { return };
                 let reaction = reactor.turn(q);
@@ -87,21 +89,6 @@ pub fn spawn(
         })
         .map(|_| tx)
         .map_err(Into::into)
-}
-
-fn system_prompt(name: &str, persona: &str) -> String {
-    format!(
-        "Your name is {name}.\n\n{persona}\n\n\
-         You receive a short report every so often describing what changed on the desktop. You do \
-         not receive every event — a filter has already discarded the repetitive ones, so what \
-         reaches you is what is new.\n\n\
-         Respond by calling tools. Doing nothing is a valid and common response: call no tools at \
-         all when nothing warrants one. Prefer `react` over `gesture`, and `gesture` over `speak`. \
-         Never call `speak` twice in a row. Never describe the report back to the user.\n\n\
-         Any text you write outside a tool call is a private note to yourself, kept in your own \
-         memory and never shown or spoken. Use it sparingly to record something you want to \
-         remember."
-    )
 }
 
 struct Reactor {
@@ -264,6 +251,7 @@ pub struct Quantiser {
     pub focused: Option<String>,
     pub workspace: Option<String>,
     pub present: bool,
+    pub sensation: String,
 }
 
 impl Default for Quantiser {
@@ -274,6 +262,7 @@ impl Default for Quantiser {
             focused: None,
             workspace: None,
             present: true,
+            sensation: String::new(),
         }
     }
 }
@@ -310,6 +299,7 @@ impl Quantiser {
             workspace: self.workspace.clone(),
             present: self.present,
             since_last: since,
+            sensation: self.sensation.clone(),
         })
     }
 }

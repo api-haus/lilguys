@@ -1,5 +1,6 @@
 //! Pluggable IO. Every sensor pushes `Observation`s; none of them decide what any of it means.
 
+pub mod inbox;
 pub mod mpris;
 pub mod wayland;
 
@@ -17,6 +18,53 @@ pub enum Observation {
     /// Something began or changed playing. `url` is the whole point: MPRIS hands over a YouTube
     /// watch id for free, so the transcript never needs a single pixel.
     Media { player: String, title: String, artist: String, url: String, playing: bool },
+    /// Interoception — the body reporting on itself rather than on the desktop.
+    ///
+    /// Everything above is something happening *out there*. This is what it feels like in here:
+    /// picked up, set down, drifted off the edge, and whatever a plugin decides to add through the
+    /// inbox socket. A feeling gets an immediate bodily response and also lands in the next slice,
+    /// so the mind reflects on it at its own pace rather than in the moment.
+    Feeling(Feeling),
+}
+
+/// One interoceptive signal. `source` names the subsystem so the body's own feelings and a
+/// plugin's read identically to the mind.
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct Feeling {
+    pub source: String,
+    pub state: String,
+    #[serde(default)]
+    pub detail: String,
+    /// Name of the expression this warrants. Unknown or absent means mild curiosity.
+    #[serde(default)]
+    pub tone: Option<String>,
+    #[serde(default = "middling")]
+    pub intensity: f32,
+    /// Seconds to hold the expression.
+    #[serde(default = "a_while")]
+    pub hold: f32,
+}
+
+fn middling() -> f32 {
+    0.5
+}
+
+fn a_while() -> f32 {
+    8.0
+}
+
+impl Feeling {
+    /// A feeling the body raises about itself.
+    pub fn own(state: &str, detail: &str, tone: &str, intensity: f32, hold: f32) -> Self {
+        Self {
+            source: "body".into(),
+            state: state.into(),
+            detail: detail.into(),
+            tone: Some(tone.into()),
+            intensity,
+            hold,
+        }
+    }
 }
 
 impl Observation {
@@ -28,6 +76,7 @@ impl Observation {
             Observation::Workspace { name } => format!("ws:{name}"),
             Observation::Presence { present } => format!("presence:{present}"),
             Observation::Media { url, title, .. } => format!("media:{url}:{title}"),
+            Observation::Feeling(f) => format!("feeling:{}:{}", f.source, f.state),
         }
     }
 
@@ -41,6 +90,12 @@ impl Observation {
             }
             Observation::Media { title, artist, playing, .. } => {
                 format!("{} {} — {}", if *playing { "playing" } else { "paused" }, clip(artist, 16), clip(title, 26))
+            }
+            Observation::Feeling(f) if f.detail.is_empty() => {
+                format!("you feel {} ({})", f.state, f.source)
+            }
+            Observation::Feeling(f) => {
+                format!("you feel {} ({}) — {}", f.state, f.source, clip(&f.detail, 40))
             }
         }
     }

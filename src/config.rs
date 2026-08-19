@@ -12,6 +12,7 @@ pub const DEFAULT_TOML: &str = include_str!("../lilguys.default.toml");
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub buddy: Buddy,
+    pub prompt: Prompt,
     pub mind: Mind,
     pub voice: Voice,
     pub senses: Senses,
@@ -75,31 +76,49 @@ fn merge(base: &mut toml::Table, over: toml::Table) {
 #[serde(deny_unknown_fields)]
 pub struct Buddy {
     pub name: String,
-    /// Character of the buddy, verbatim into the system prompt.
-    pub persona: String,
-    /// Overrides `persona` when set. Relative paths resolve beside the config file.
-    #[serde(default)]
-    pub persona_file: Option<PathBuf>,
     pub skin: String,
     /// Character height in pixels.
     pub size: f32,
 }
 
-impl Buddy {
-    pub fn persona_text(&self, config_dir: Option<&Path>) -> String {
-        let Some(file) = self.persona_file.as_ref() else { return self.persona.clone() };
-        let path = match (file.is_relative(), config_dir) {
-            (true, Some(dir)) => dir.join(file),
-            _ => file.clone(),
-        };
-        match std::fs::read_to_string(&path) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("persona_file {}: {e}", path.display());
-                self.persona.clone()
-            }
-        }
+/// The whole system prompt, in the order it is assembled: operating contract, then character.
+///
+/// Splitting them is not cosmetic. The preamble is the contract every lilguy is held to whatever
+/// it is like; the persona is what this one is like. Rewriting the character should not be able to
+/// delete the rule that keeps system text out of its mouth.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Prompt {
+    /// How to behave, regardless of character. Sent first.
+    pub preamble: String,
+    /// Overrides `preamble`. Relative paths resolve beside the config file.
+    #[serde(default)]
+    pub preamble_file: Option<PathBuf>,
+    /// What this one is like. Sent after the preamble.
+    pub persona: String,
+    #[serde(default)]
+    pub persona_file: Option<PathBuf>,
+}
+
+impl Prompt {
+    /// Assembles the system prompt. `{name}` in either part becomes the buddy's name.
+    pub fn assemble(&self, name: &str, config_dir: Option<&Path>) -> String {
+        let preamble = read_or(&self.preamble, self.preamble_file.as_deref(), config_dir);
+        let persona = read_or(&self.persona, self.persona_file.as_deref(), config_dir);
+        format!("{}\n\n{}", preamble.trim(), persona.trim()).replace("{name}", name)
     }
+}
+
+fn read_or(inline: &str, file: Option<&Path>, config_dir: Option<&Path>) -> String {
+    let Some(file) = file else { return inline.to_string() };
+    let path = match (file.is_relative(), config_dir) {
+        (true, Some(dir)) => dir.join(file),
+        _ => file.to_path_buf(),
+    };
+    std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        eprintln!("{}: {e}", path.display());
+        inline.to_string()
+    })
 }
 
 #[derive(Debug, Clone, Deserialize)]
