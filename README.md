@@ -50,5 +50,7 @@ The model must support **native tool calls**; lilguys does not parse calls out o
 Logs land in `~/.local/state/lilguys/`: `turns.jsonl` is every model turn verbatim — slice sent,
 raw reply, intents parsed, calls rejected and why — and `events.jsonl` is every gate ruling.
 
-Grayboxing aids are off by default; turn them on per-kind under `[debug]`. `LILGUYS_DEBUG_INPUT=1`
+Grayboxing aids are off by default; turn them on per-kind under `[debug]`. `overhead = 4` floats
+the last few gate rulings above his head — the debugging instrument that moves with him instead of
+covering the screen. `LILGUYS_DEBUG_HTTP=1` prints provider requests and replies. `LILGUYS_DEBUG_INPUT=1`
 prints the input rectangle and `LILGUYS_DEBUG_MPRIS=1` prints every D-Bus media signal.

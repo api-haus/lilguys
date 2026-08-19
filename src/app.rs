@@ -54,6 +54,7 @@ pub struct App {
     pub voice: Voice,
     to_mind: Option<std::sync::mpsc::Sender<ToMind>>,
     last_reaction: Option<Reaction>,
+    thought: Option<(Instant, f32, String)>,
     mind_error: Option<String>,
     turns: u32,
 
@@ -111,6 +112,7 @@ impl App {
             voice,
             to_mind,
             last_reaction: None,
+            thought: None,
             mind_error: None,
             turns: 0,
             config,
@@ -136,7 +138,8 @@ impl App {
 
     /// Seconds until the next tick. Falls to `IDLE_HZ` when nothing is animating.
     pub fn tick_interval(&self) -> f32 {
-        let busy = self.body.moving()
+        let busy = self.thought.is_some()
+            || self.body.moving()
             || self.body.drift != Drift::Idle
             || self.body.gesture().is_some()
             || self.body.speaking
@@ -236,6 +239,9 @@ impl App {
                 Intent::React { emotion, intensity, hold } => {
                     self.body.feel(*emotion, *intensity, *hold)
                 }
+                Intent::Think { text, hold } => {
+                    self.thought = Some((Instant::now(), *hold, text.clone()))
+                }
                 Intent::Gesture { gesture } => self.body.perform(*gesture),
                 Intent::Speak { text } => {
                     if !self.voice.say(text) {
@@ -308,6 +314,7 @@ impl App {
             std::mem::replace(&mut self.avatar, Box::new(Graybox::annotated(self.config.debug.rig)));
         avatar.draw(&mut self.painter, origin, facing, scale);
         self.avatar = avatar;
+        self.overhead(origin);
         if self.show_hud {
             self.hud(cursor, origin);
             self.sense_hud();
@@ -374,6 +381,77 @@ impl App {
             let cx = if v >= 0.0 { bx + 45.0 + w * 0.5 } else { bx + 45.0 - w * 0.5 };
             self.painter.rect(cx, y - 3.5, w.max(1.0), 3.0, if v >= 0.0 { ink } else { hot });
             y += 13.0;
+        }
+    }
+
+    /// A thought bubble and, optionally, a few recent gate rulings — both floating with him rather
+    /// than covering the screen. Above his head, flipped below when there is no room up there.
+    fn overhead(&mut self, origin: [f32; 2]) {
+        let size = self.config.buddy.size;
+        let mut y = origin[1] - size * 1.06;
+        let below = y < 90.0;
+        if below {
+            y = origin[1] + size * 0.14;
+        }
+        let line_h = 13.0;
+
+        if self.config.debug.overhead > 0 {
+            let dim = rgba(150, 158, 176, 0.55);
+            let hot = rgba(250, 214, 82, 0.8);
+            let rows: Vec<(String, [f32; 4])> = self
+                .attention
+                .log
+                .iter()
+                .take(self.config.debug.overhead)
+                .map(|e| {
+                    let hue = if matches!(e.verdict, Verdict::Think | Verdict::Emote) { hot } else { dim };
+                    (format!("{} {}", e.verdict.tag(), crate::sensors::clip(&e.text, 44)), hue)
+                })
+                .collect();
+            // Oldest at the top, so new lines push upward away from him.
+            let block = rows.len() as f32 * line_h;
+            let top = if below { y } else { y - block };
+            for (i, (text, color)) in rows.iter().rev().enumerate() {
+                let ly = top + i as f32 * line_h;
+                let w = self.painter.text_width(10.0, text);
+                // Centred on him and opaque enough to read over a bright window underneath.
+                self.painter.rrect(origin[0], ly - 3.0, w + 12.0, 13.0, 3.0, rgba(12, 14, 20, 0.78));
+                self.painter.text(origin[0] - w * 0.5, ly, 10.0, *color, text);
+            }
+            y = if below { y + block + 6.0 } else { top - 8.0 };
+        }
+
+        let Some((at, hold, text)) = self.thought.clone() else { return };
+        let age = at.elapsed().as_secs_f32();
+        if age > hold {
+            self.thought = None;
+            return;
+        }
+        // Fades over the last second so it does not simply vanish mid-read.
+        let alpha = ((hold - age) / 1.0).clamp(0.0, 1.0);
+
+        let max_w = 260.0;
+        let lines = self.painter.wrap(13.0, max_w, &text);
+        let w = lines.iter().map(|l| self.painter.text_width(13.0, l)).fold(0.0, f32::max);
+        let h = lines.len() as f32 * 17.0;
+        let (bx, by) = (origin[0], if below { y + h * 0.5 } else { y - h * 0.5 });
+
+        self.painter.rrect(bx, by, w + 26.0, h + 20.0, 9.0, rgba(20, 22, 30, 0.82 * alpha));
+        self.painter.rrect(bx, by, w + 26.0, h + 20.0, 9.0, rgba(0, 0, 0, 0.0));
+        // Two shrinking dots for the tail, the way a thought bubble is drawn.
+        let dir = if below { -1.0 } else { 1.0 };
+        for (i, r) in [(1.0, 5.0), (2.0, 3.0)] {
+            let dy = by + dir * (h * 0.5 + 12.0 + i * 9.0);
+            self.painter.ellipse(bx + i * 5.0, dy, r * 2.0, r * 2.0, rgba(20, 22, 30, 0.82 * alpha));
+        }
+        for (i, line) in lines.iter().enumerate() {
+            self.painter.text(
+                bx - w * 0.5,
+                by - h * 0.5 + 13.0 + i as f32 * 17.0,
+                13.0,
+                rgba(232, 236, 245, alpha),
+                line,
+            );
         }
     }
 

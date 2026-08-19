@@ -18,7 +18,9 @@ attention gate whose job is to discard most of what it sees.
 1. **The mind never perceives directly, and the body never waits for it.** Everything in
    philosophy.md §"What this forbids" holds.
 2. **Native tool calls only.** A model that writes `react(pleased)` into message text is
-   misconfigured. Report it; never parse around it.
+   misconfigured. Report it; never parse around it. A reasoning model needs a `max_tokens` in the
+   thousands or it stops mid-thought having called nothing — `--check` names that case.
+   `LILGUYS_DEBUG_HTTP=1` prints the request body and reply when a provider misbehaves.
 3. **Never speak system text.** `speak` is the one capability vetted, in
    `mind/capability.rs::vet_speech`. Adding a way for prompt or schema text to reach the voice is a
    defect, not a feature.

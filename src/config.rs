@@ -183,6 +183,11 @@ pub struct Provider {
     /// Extra headers some gateways want, e.g. OpenRouter's `HTTP-Referer`.
     #[serde(default)]
     pub headers: BTreeMap<String, String>,
+    /// Merged into the request body verbatim. The escape hatch for backend-specific switches —
+    /// `think = false` for a reasoning model on ollama, `reasoning_effort`, `top_k`, anything.
+    /// The field names here belong to the provider's API, not to lilguys.
+    #[serde(default)]
+    pub extra: toml::Table,
 }
 
 impl Default for Provider {
@@ -195,6 +200,7 @@ impl Default for Provider {
             max_tokens: 512,
             timeout: Duration::from_secs(60),
             headers: BTreeMap::new(),
+            extra: toml::Table::new(),
         }
     }
 }
@@ -269,6 +275,9 @@ pub struct Debug {
     pub rig: bool,
     /// Awareness radius rings and the line to the pointer.
     pub radii: bool,
+    /// Lines of recent gate rulings to float above his head. 0 is off. This is the debugging
+    /// instrument that moves with him instead of covering the screen.
+    pub overhead: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -320,12 +320,20 @@ pub fn probe(config: &Config) -> Result<Probe> {
         &capability::schemas(),
     )?;
 
-    let calls = reply.tool_calls.unwrap_or_default();
-    let text = reply.content.unwrap_or_default();
+    let calls = reply.tool_calls.clone().unwrap_or_default();
+    let text = reply.content.clone().unwrap_or_default();
+    let spent = reply.completion_tokens;
+    let cap = client.provider.max_tokens as u64;
     let detail = if !calls.is_empty() {
         calls.iter().map(|c| c.function.name.as_str()).collect::<Vec<_>>().join(", ")
+    } else if reply.finish_reason.as_deref() == Some("length") {
+        // A reasoning model can spend its whole budget thinking and never reach the call.
+        format!(
+            "spent its entire {cap}-token budget before answering. Raise [providers.*] max_tokens, \
+             or switch thinking off — on ollama that is `extra = {{ think = false }}`"
+        )
     } else if text.trim().is_empty() {
-        "replied with nothing at all".into()
+        format!("stopped after {spent} tokens having produced neither a call nor any text")
     } else {
         format!("replied with text: {}", crate::sensors::clip(text.trim(), 60))
     };

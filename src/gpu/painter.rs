@@ -195,4 +195,29 @@ impl Painter {
         pen - x
     }
 
+    pub fn text_width(&mut self, px: f32, s: &str) -> f32 {
+        let k = px / ATLAS_PX;
+        s.chars().map(|c| self.glyph(c).advance * k).sum()
+    }
+
+    /// Greedy wrap at `max_px`. A single word longer than the line is left to overhang rather
+    /// than broken, because a hyphenated thought reads worse than a wide one.
+    pub fn wrap(&mut self, px: f32, max_px: f32, text: &str) -> Vec<String> {
+        let mut lines: Vec<String> = Vec::new();
+        let mut line = String::new();
+        for word in text.split_whitespace() {
+            let candidate =
+                if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
+            if !line.is_empty() && self.text_width(px, &candidate) > max_px {
+                lines.push(std::mem::take(&mut line));
+                line = word.to_string();
+            } else {
+                line = candidate;
+            }
+        }
+        if !line.is_empty() {
+            lines.push(line);
+        }
+        lines
+    }
 }

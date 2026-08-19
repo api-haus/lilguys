@@ -14,6 +14,11 @@ pub struct Message {
     pub tool_calls: Option<Vec<ToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    /// Why generation stopped, and how much it spent. Never sent back, only reported.
+    #[serde(default, skip_serializing)]
+    pub finish_reason: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub completion_tokens: u64,
 }
 
 impl Message {
@@ -31,6 +36,8 @@ impl Message {
             content: Some(text.into()),
             tool_calls: None,
             tool_call_id: None,
+            finish_reason: None,
+            completion_tokens: 0,
         }
     }
 
@@ -40,6 +47,8 @@ impl Message {
             content: Some(text.into()),
             tool_calls: None,
             tool_call_id: Some(id.into()),
+            finish_reason: None,
+            completion_tokens: 0,
         }
     }
 
@@ -76,7 +85,7 @@ pub struct FunctionCall {
 }
 
 pub struct Client {
-    provider: Provider,
+    pub provider: Provider,
     agent: ureq::Agent,
     key: Option<String>,
 }
@@ -109,6 +118,18 @@ impl Client {
             body["tools"] = tools.clone();
             body["tool_choice"] = json!("auto");
         }
+        for (k, v) in &self.provider.extra {
+            if let Ok(v) = serde_json::to_value(v) {
+                body[k] = v;
+            }
+        }
+
+        if std::env::var_os("LILGUYS_DEBUG_HTTP").is_some() {
+            let mut shown = body.clone();
+            shown["messages"] = json!(format!("<{} messages>", messages.len()));
+            shown["tools"] = json!(format!("<{} tools>", tools.as_array().map(Vec::len).unwrap_or(0)));
+            eprintln!("http request: {shown}");
+        }
 
         let url = format!("{}/chat/completions", self.provider.url.trim_end_matches('/'));
         let mut req = self.agent.post(&url).header("content-type", "application/json");
@@ -121,15 +142,28 @@ impl Client {
 
         let mut res = req.send_json(&body).context("chat request failed")?;
         let parsed: Value = res.body_mut().read_json().context("chat response was not json")?;
+        if std::env::var_os("LILGUYS_DEBUG_HTTP").is_some() {
+            eprintln!("http reply  : {}", &parsed.to_string()[..parsed.to_string().len().min(600)]);
+        }
         if let Some(err) = parsed.get("error") {
             bail!("provider error: {err}");
         }
-        let choice = parsed
+        let first = parsed
             .get("choices")
             .and_then(|c| c.get(0))
-            .and_then(|c| c.get("message"))
-            .context("chat response had no message")?;
-        serde_json::from_value(choice.clone()).context("could not read the assistant message")
+            .context("chat response had no choices")?;
+        let mut message: Message = serde_json::from_value(
+            first.get("message").context("chat response had no message")?.clone(),
+        )
+        .context("could not read the assistant message")?;
+        message.finish_reason =
+            first.get("finish_reason").and_then(Value::as_str).map(str::to_string);
+        message.completion_tokens = parsed
+            .get("usage")
+            .and_then(|u| u.get("completion_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        Ok(message)
     }
 
     /// A plain completion with no tools, used for context compaction.

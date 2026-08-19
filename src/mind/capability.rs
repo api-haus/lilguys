@@ -44,6 +44,7 @@ impl Place {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Intent {
     React { emotion: Emotion, intensity: f32, hold: f32 },
+    Think { text: String, hold: f32 },
     Gesture { gesture: Gesture },
     Speak { text: String },
     Focus { target: FocusTarget, linger: f32 },
@@ -55,6 +56,7 @@ impl Intent {
             Intent::React { emotion, intensity, .. } => {
                 format!("react {} {:.0}%", emotion.name(), intensity * 100.0)
             }
+            Intent::Think { text, .. } => format!("think \"{}\"", crate::sensors::clip(text, 40)),
             Intent::Gesture { gesture } => format!("gesture {}", gesture.name()),
             Intent::Speak { text } => format!("speak \"{}\"", crate::sensors::clip(text, 40)),
             Intent::Focus { target, .. } => match target {
@@ -67,12 +69,23 @@ impl Intent {
     }
 }
 
+/// Models routinely send numbers as strings. That is a JSON-typing slip, not a broken call, and
+/// rejecting the whole thing over it throws away an intention that was perfectly clear.
+fn lenient_f32<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
+    use serde::de::Error;
+    match serde_json::Value::deserialize(d)? {
+        serde_json::Value::Number(n) => Ok(n.as_f64().unwrap_or(0.0) as f32),
+        serde_json::Value::String(s) => s.trim().parse().map_err(D::Error::custom),
+        other => Err(D::Error::custom(format!("expected a number, got {other}"))),
+    }
+}
+
 #[derive(Deserialize)]
 struct ReactArgs {
     emotion: String,
-    #[serde(default = "half")]
+    #[serde(default = "half", deserialize_with = "lenient_f32")]
     intensity: f32,
-    #[serde(default = "default_hold")]
+    #[serde(default = "default_hold", deserialize_with = "lenient_f32")]
     hold: f32,
 }
 
@@ -87,13 +100,20 @@ struct SpeakArgs {
 }
 
 #[derive(Deserialize)]
+struct ThinkArgs {
+    text: String,
+    #[serde(default = "default_linger", deserialize_with = "lenient_f32")]
+    hold: f32,
+}
+
+#[derive(Deserialize)]
 struct FocusArgs {
     target: String,
     #[serde(default)]
     r#match: Option<String>,
     #[serde(default)]
     place: Option<Place>,
-    #[serde(default = "default_linger")]
+    #[serde(default = "default_linger", deserialize_with = "lenient_f32")]
     linger: f32,
 }
 
@@ -121,9 +141,15 @@ fn vet_speech(text: &str) -> Result<String, String> {
     if words > SPEAK_WORD_CAP {
         return Err(format!("{words} words, cap is {SPEAK_WORD_CAP}"));
     }
+    vet_leakage(&text)?;
+    Ok(text)
+}
+
+/// Structural markers of machinery escaping into something a person sees or hears.
+fn vet_leakage(text: &str) -> Result<(), String> {
     for debris in ['{', '}', '[', ']', '<', '>'] {
         if text.contains(debris) {
-            return Err(format!("contains {debris:?}, looks like markup not speech"));
+            return Err(format!("contains {debris:?}, looks like markup"));
         }
     }
     let lower = text.to_lowercase();
@@ -132,7 +158,7 @@ fn vet_speech(text: &str) -> Result<String, String> {
             return Err(format!("contains {tell:?}, looks like prompt leakage"));
         }
     }
-    Ok(text)
+    Ok(())
 }
 
 /// Parses one tool call. A malformed call is reported rather than dropped, so the log says why.
@@ -154,6 +180,16 @@ pub fn parse(name: &str, arguments: &str) -> Result<Intent, String> {
             let gesture = Gesture::from_name(&a.gesture)
                 .ok_or_else(|| format!("unknown gesture {:?}", a.gesture))?;
             Ok(Intent::Gesture { gesture })
+        }
+        "think" => {
+            let a: ThinkArgs = serde_json::from_str(args).map_err(|e| e.to_string())?;
+            // A thought is silent, so it is vetted for leakage but not for length.
+            let text = a.text.trim().trim_matches('"').trim().to_string();
+            if text.is_empty() {
+                return Err("empty".into());
+            }
+            vet_leakage(&text)?;
+            Ok(Intent::Think { text, hold: a.hold.clamp(3.0, 300.0) })
         }
         "speak" => {
             let a: SpeakArgs = serde_json::from_str(args).map_err(|e| e.to_string())?;
@@ -196,6 +232,16 @@ pub fn schemas() -> Value {
                 "gesture": { "type": "string", "enum": Gesture::NAMES }
             },
             "required": ["gesture"]
+        })),
+        tool("think", "Have a visible thought. It appears over your head in writing and nobody \
+             hears it, so it interrupts nothing and may stay up for a long while. This is how you \
+             say something without saying it.", json!({
+            "type": "object",
+            "properties": {
+                "text": { "type": "string", "description": "the thought, a phrase or a sentence" },
+                "hold": { "type": "number", "description": "seconds to leave it up" }
+            },
+            "required": ["text"]
         })),
         tool("speak", "Say something out loud. This interrupts. Keep it under fifteen words and \
              use it rarely — silence is almost always better.", json!({
