@@ -64,12 +64,15 @@ the next when it has to.
 
 | clock | rate | cost | what it does |
 |---|---|---|---|
-| reflex | 60 Hz awake, 8 Hz idle | none | drift, gaze, blink, breathing, click, drag |
+| reflex | 60 Hz on screen, 8 Hz off it | none | drift, gaze, blink, breathing, click, drag |
 | notice | per event | none | novelty and dwell filtering, the reflex arc |
 | think | one slice, at most | tokens | the model decides what to actually do |
 
-The reflex clock is the render tick. It drops to 8 Hz whenever the character is settled and nothing
-is animating, which is most of the time.
+The reflex clock is the render tick. It drops to 8 Hz only once every character has drifted off the
+edge of the screen. A settled character is not a still one: the idle regiment below keeps breathing,
+swaying and blinking under it, and 8 Hz of that reads as a strobe rather than a saving. Presence is
+deliberately not the test — `ext-idle-notify` reports that no key was pressed, which is not the same
+thing as nobody watching, and throttling on it strobes at anyone who sits still and reads.
 
 Two distinct things run without a model, and they are easy to confuse:
 

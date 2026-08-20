@@ -94,14 +94,6 @@ impl Guy {
         facts
     }
 
-    pub fn busy(&self) -> bool {
-        self.thought.is_some()
-            || self.body.moving()
-            || self.body.drift != crate::locomotion::Drift::Idle
-            || self.body.gesture().is_some()
-            || self.body.speaking
-    }
-
     /// Everything sensed since the last tick, ruled on and bucketed for this one's own mind.
     pub fn sense(&mut self, shared: &[crate::sensors::Sensed], now: Instant) -> Vec<String> {
         for feeling in self.body.drain_feelings() {

@@ -36,10 +36,13 @@ use wayland_client::{
     Connection, QueueHandle,
 };
 
-/// Tick rate while something is moving. Idle drops to `IDLE_HZ` — that gap is the whole economy
-/// story, so it is measured in the HUD rather than assumed.
+/// Tick rate while anybody can see them. The idle regiment never stops, so `IDLE_HZ` is for an
+/// empty chair, not for a body at rest — that gap is measured in the HUD rather than assumed.
 const ACTIVE_HZ: f32 = 60.0;
 const IDLE_HZ: f32 = 8.0;
+/// A stall must not teleport anybody, and this has to clear the idle interval or the idle regiment
+/// runs slow whenever nobody is watching.
+const MAX_DT: f32 = 2.0 / IDLE_HZ;
 
 /// A message box abandoned for this long closes itself and hands the keyboard back.
 const TYPING_TIMEOUT: f32 = 45.0;
@@ -147,13 +150,13 @@ impl App {
         }
     }
 
-    /// Seconds until the next tick. Falls to `IDLE_HZ` when nothing is animating.
+    /// Seconds until the next tick. Falls to `IDLE_HZ` only once every one of them is off the edge
+    /// of the screen. Breathing, swaying and blinking carry on under a settled body, so a body at
+    /// rest still needs every frame; 8 Hz of an idle regiment reads as a strobe. Presence is not
+    /// the test either — `ext-idle-notify` says no key was pressed, not that nobody is watching.
     pub fn tick_interval(&self) -> f32 {
-        let busy = self.hover
-            || self.held.is_some()
-            || self.typing.is_some()
-            || self.guys.iter().any(Guy::busy);
-        1.0 / if busy { ACTIVE_HZ } else { IDLE_HZ }
+        let seen = self.guys.iter().any(|g| !g.body.offscreen());
+        1.0 / if seen { ACTIVE_HZ } else { IDLE_HZ }
     }
 
     pub fn tick(&mut self) {
@@ -161,7 +164,7 @@ impl App {
             return;
         }
         let now = Instant::now();
-        let dt = (now - self.last_tick).as_secs_f32().min(0.1);
+        let dt = (now - self.last_tick).as_secs_f32().min(MAX_DT);
         self.last_tick = now;
 
         // A box left open holds the keyboard, and a keyboard held by a mistake is the worst bug
