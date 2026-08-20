@@ -330,6 +330,8 @@ fn status(as_json: bool) -> Result<bool> {
     let pids = service::pids();
     let unit = service::unit();
 
+    let meter = meter_snapshot(&config);
+
     if as_json {
         println!(
             "{}",
@@ -345,6 +347,7 @@ fn status(as_json: bool) -> Result<bool> {
                 "roster": names,
                 "config": from.map(|p| p.display().to_string()),
                 "provider": config.mind.provider,
+                "telemetry": meter,
             })
         );
         return Ok(!pids.is_empty());
@@ -352,7 +355,63 @@ fn status(as_json: bool) -> Result<bool> {
 
     println!("{}", service::status_check().line());
     println!("{:<5} {:<10} {}", "ok", "roster", names.join(", "));
+    for line in cost_lines(&meter) {
+        println!("{:<5} {}", "ok", line);
+    }
     Ok(!pids.is_empty())
+}
+
+/// The daemon's own counters, written beside the logs. Absent when telemetry is off or nobody has
+/// run long enough to write one.
+fn meter_snapshot(config: &Config) -> serde_json::Value {
+    let dir = config.log.dir.clone().unwrap_or_else(lilguysd::log::default_dir);
+    std::fs::read_to_string(dir.join("state.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or(json!(null))
+}
+
+/// What it cost, one line each, in the same two columns as every other check.
+fn cost_lines(meter: &serde_json::Value) -> Vec<String> {
+    let mut lines = Vec::new();
+    let Some(m) = meter.as_object() else { return lines };
+    let pairs = |v: Option<&serde_json::Value>| -> String {
+        v.and_then(|v| v.as_object())
+            .map(|o| {
+                o.iter()
+                    .filter(|(_, n)| n.as_u64().unwrap_or(0) > 0)
+                    .map(|(k, n)| format!("{k} {n}"))
+                    .collect::<Vec<_>>()
+                    .join(" · ")
+            })
+            .unwrap_or_default()
+    };
+
+    if let Some(f) = m.get("frames").and_then(|f| f.as_object()) {
+        let hz = f.get("tick_hz").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+        let render = f.get("render").and_then(|r| r.get("p99_ms")).and_then(|v| v.as_f64());
+        let gap = f.get("interval").and_then(|r| r.get("p99_ms")).and_then(|v| v.as_f64());
+        let submitted = f.get("submitted").and_then(serde_json::Value::as_u64).unwrap_or(0);
+        lines.push(format!(
+            "{:<10} {submitted} at {hz:.0} Hz · render p99 {:.1} ms · gap p99 {:.1} ms",
+            "frames",
+            render.unwrap_or(0.0),
+            gap.unwrap_or(0.0),
+        ));
+    }
+    for (who, per) in m.get("guys").and_then(|g| g.as_object()).into_iter().flatten() {
+        lines.push(format!("{:<10} {}", who, pairs(Some(per))));
+    }
+    for field in ["gate", "refusals", "drops"] {
+        let text = pairs(m.get(field));
+        if !text.is_empty() {
+            lines.push(format!("{field:<10} {text}"));
+        }
+    }
+    if let Some(up) = m.get("uptime_s").and_then(serde_json::Value::as_u64) {
+        lines.push(format!("{:<10} {}h {}m", "uptime", up / 3600, (up % 3600) / 60));
+    }
+    lines
 }
 
 /// A message goes in through the same socket a feeding mechanic uses, because there is one stream.

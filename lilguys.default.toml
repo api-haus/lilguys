@@ -218,6 +218,15 @@ per_source_cap = 3
 enabled = true
 # dir = "~/.local/state/lilguys"
 
+# Counters with attribution, answering what anything cost without reading a log by eye:
+# `lilguy status`. Naming an OTLP collector also pushes them there — that is the development
+# stack in packaging/observability, and it is off until you name one. See docs/telemetry.md.
+[telemetry]
+enabled = true
+snapshot = "30s"
+push = "10s"
+# otlp = "http://127.0.0.1:4318"
+
 # Grayboxing aids. All off by default: this is what he looks like, not scaffolding.
 [debug]
 hud = false

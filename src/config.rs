@@ -21,6 +21,7 @@ pub struct Config {
     pub motion: Motion,
     pub debug: Debug,
     pub log: Logging,
+    pub telemetry: Telemetry,
     pub providers: BTreeMap<String, Provider>,
 }
 
@@ -522,6 +523,23 @@ pub struct Logging {
     /// Defaults to `$XDG_STATE_HOME/lilguys`.
     #[serde(default)]
     pub dir: Option<PathBuf>,
+}
+
+/// Attributed counters. The snapshot beside the logs is always on and costs nothing; the OTLP push
+/// is a development instrument and stays off until an endpoint is named.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Telemetry {
+    pub enabled: bool,
+    /// How often `state.json` is rewritten. Zero never writes it.
+    #[serde(with = "humantime_serde")]
+    pub snapshot: Duration,
+    /// An OTLP/HTTP collector, base URL only — `/v1/metrics` and `/v1/traces` are appended.
+    #[serde(default)]
+    pub otlp: Option<String>,
+    /// How often the collector is pushed to. Zero never pushes.
+    #[serde(with = "humantime_serde")]
+    pub push: Duration,
 }
 
 /// Grayboxing aids. All off by default — this is what he looks like, not scaffolding.

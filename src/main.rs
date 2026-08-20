@@ -8,7 +8,7 @@ use calloop::{
 use calloop_wayland_source::WaylandSource;
 use lilguysd::{
     app::App, config, config::Config, doctor, gpu::painter::Painter, guy, hypr::Hypr, log, mind,
-    sensors, voice, FONT,
+    sensors, telemetry, voice, FONT,
 };
 use smithay_client_toolkit::{
     compositor::{CompositorState, Region},
@@ -57,9 +57,15 @@ fn main() -> Result<()> {
         Some(p) => eprintln!("config: {}", p.display()),
         None => eprintln!("config: built-in defaults; `lilguysd --print-config` writes a starting point"),
     }
-    match log::init(&cfg.log) {
+    let state_dir = log::init(&cfg.log);
+    match state_dir.as_ref() {
         Some(dir) => eprintln!("log: {}", dir.display()),
         None => eprintln!("log: disabled"),
+    }
+    match (telemetry::init(&cfg.telemetry, state_dir), cfg.telemetry.otlp.as_deref()) {
+        (Some(p), Some(otlp)) => eprintln!("telemetry: {} and {otlp}", p.display()),
+        (Some(p), None) => eprintln!("telemetry: {}", p.display()),
+        (None, _) => eprintln!("telemetry: disabled"),
     }
     let config_dir = from.as_deref().and_then(|p| p.parent()).map(|p| p.to_path_buf());
 
@@ -131,7 +137,7 @@ fn main() -> Result<()> {
         let to_mind = match cfg.mind.enabled {
             true => {
                 let provider = entry.provider.clone().unwrap_or_else(|| cfg.mind.provider.clone());
-                match mind::spawn(&cfg, &provider, system, mind_tx) {
+                match mind::spawn(&cfg, &character.name, &provider, system, mind_tx) {
                     Ok(tx) => Some(tx),
                     Err(e) => {
                         eprintln!("{}: mind disabled: {e:#}", character.name);

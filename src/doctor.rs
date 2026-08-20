@@ -132,6 +132,7 @@ pub fn run(on: &mut dyn FnMut(&Check)) -> Report {
     emit(senses(&config), &mut checks);
     emit(pace(&config), &mut checks);
     emit(logging(&config), &mut checks);
+    emit(telemetry(&config), &mut checks);
     emit(crate::service::status_check(), &mut checks);
     emit(inbox(), &mut checks);
 
@@ -353,6 +354,31 @@ fn logging(config: &Config) -> Check {
     match dir.is_dir() {
         true => ok("log", dir.display().to_string()),
         false => ok("log", format!("{} (created on start)", dir.display())),
+    }
+}
+
+/// The meter, and whether a named collector is actually there. An endpoint in the config that
+/// nobody started looks identical to working telemetry until you open Grafana and find it empty.
+fn telemetry(config: &Config) -> Check {
+    let t = &config.telemetry;
+    if !t.enabled {
+        return warn("telemetry", "disabled — `lilguy status` will have no cost lines")
+            .fix("set [telemetry] enabled = true");
+    }
+    let Some(endpoint) = t.otlp.as_deref() else {
+        return ok("telemetry", format!("state.json every {:?}", t.snapshot));
+    };
+    let probe = ureq::post(format!("{}/v1/metrics", endpoint.trim_end_matches('/')))
+        .config()
+        .timeout_global(Some(std::time::Duration::from_secs(3)))
+        .build()
+        .header("content-type", "application/json")
+        .send_json(serde_json::json!({ "resourceMetrics": [] }));
+    match probe {
+        Ok(_) => ok("telemetry", format!("state.json every {:?} · {endpoint} every {:?}",
+                                         t.snapshot, t.push)),
+        Err(e) => fail("telemetry", format!("{endpoint}: {e}"))
+            .fix("start it: `cd packaging/observability && docker compose up -d`"),
     }
 }
 

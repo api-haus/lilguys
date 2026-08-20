@@ -9,6 +9,7 @@ use crate::guy::Guy;
 use crate::hypr::Hypr;
 use crate::mind::capability::{FocusTarget, Intent};
 use crate::mind::{Reaction, ToMind};
+use crate::telemetry;
 use crate::locomotion::Target;
 use crate::sensors::wayland::Sensors;
 use crate::sensors::Observation;
@@ -164,8 +165,11 @@ impl App {
             return;
         }
         let now = Instant::now();
-        let dt = (now - self.last_tick).as_secs_f32().min(MAX_DT);
+        let gap = (now - self.last_tick).as_secs_f32();
+        let dt = gap.min(MAX_DT);
         self.last_tick = now;
+        // The gap before the clamp, because a clamped one cannot show a rate that has halved.
+        telemetry::record(telemetry::name::FRAME_INTERVAL, gap as f64 * 1000.0, &[]);
 
         // A box left open holds the keyboard, and a keyboard held by a mistake is the worst bug
         // this feature can have. It closes itself if nobody is typing.
@@ -180,6 +184,12 @@ impl App {
             self.guys[i].body.drag_to(cursor[0], cursor[1]);
         }
         for guy in &mut self.guys {
+            // One tick per state rather than a transition, so a dashboard rate() reads straight
+            // off as the share of the hour he spent there.
+            telemetry::count(
+                telemetry::name::DRIFT,
+                &[("who", &guy.name), ("state", guy.body.drift.name())],
+            );
             guy.body.update(cursor, dt, &mut guy.pose);
             Self::express(guy, dt);
             let drive = guy.drive();
@@ -197,6 +207,11 @@ impl App {
             }
         }
         self.frame_ms = started.elapsed().as_secs_f32() * 1000.0;
+        telemetry::count(telemetry::name::FRAMES, &[]);
+        telemetry::record(telemetry::name::FRAME_RENDER, self.frame_ms as f64, &[]);
+        telemetry::gauge(telemetry::name::TICK_RATE, 1.0 / self.tick_interval() as f64, &[]);
+        let seen = self.guys.iter().filter(|g| !g.body.offscreen()).count();
+        telemetry::gauge(telemetry::name::ON_SCREEN, seen as f64, &[]);
 
         self.frames += 1;
         let win = self.fps_window.elapsed().as_secs_f32();
@@ -255,6 +270,7 @@ impl App {
                         println!("    ({name} could not speak just then)");
                         continue;
                     }
+                    telemetry::count(telemetry::name::SPEECH, &[("who", &name)]);
                 }
                 Intent::Focus { target, linger } => {
                     if let Some(t) = self.resolve(who, target, *linger) {
@@ -298,6 +314,10 @@ impl App {
             if last.elapsed() < floor {
                 let gap = last.elapsed().as_secs_f32();
                 crate::log::note("floor", &format!("{who} held back — somebody spoke {gap:.0}s ago"));
+                telemetry::count(
+                    telemetry::name::REFUSALS,
+                    &[("who", who), ("reason", "speech floor")],
+                );
                 return false;
             }
         }

@@ -92,6 +92,21 @@ impl Feeling {
 }
 
 impl Observation {
+    /// The closed set of observation kinds, named once — a plugin filters on these, so they are a
+    /// contract rather than strings in use. See docs/todo/taxonomy-and-telemetry.md.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Observation::Focus { .. } => "focus",
+            Observation::Title { .. } => "title",
+            Observation::Workspace { .. } => "workspace",
+            Observation::Presence { .. } => "presence",
+            Observation::Media { .. } => "media",
+            Observation::Witnessed { .. } => "witnessed",
+            Observation::Told { .. } => "told",
+            Observation::Feeling(_) => "feeling",
+        }
+    }
+
     /// Identity for novelty checks. Two observations with the same key say nothing new.
     pub fn key(&self) -> String {
         match self {

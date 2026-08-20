@@ -1,0 +1,8 @@
+# Mounted as one file so the image keeps its own providers beside this one.
+apiVersion: 1
+providers:
+  - name: lilguys
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

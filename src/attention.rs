@@ -70,6 +70,16 @@ impl Verdict {
             Verdict::Think => "*",
         }
     }
+
+    /// The closed-set word behind the glyph, which is what a counter and a plugin filter use.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Verdict::Ignored => "ignored",
+            Verdict::Pending => "pending",
+            Verdict::Emote => "emote",
+            Verdict::Think => "think",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

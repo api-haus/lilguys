@@ -8,6 +8,7 @@ compiles and works.
 - [docs/roadmap.md](docs/roadmap.md) — phases from here on, each ending in something demonstrable
 - [docs/todo/](docs/todo/) — the twelve designs those phases implement
 - [docs/design-space.md](docs/design-space.md) — what Wayland exposes, **measured on real hardware**
+- [docs/telemetry.md](docs/telemetry.md) — what is counted, and the development Grafana stack
 - [docs/qa-graybox.md](docs/qa-graybox.md) — five manual checks, about three minutes
 
 ## The shape in one paragraph
@@ -58,6 +59,7 @@ cargo lilguy doctor                       # in this tree; the alias takes any su
 ./target/release/lilguy start | stop      # the unit if installed, a detached process if not
 ./target/release/lilguy restart           # config is read once at startup; this is how it lands
 ./target/release/lilguy say "…"           # a message reaches them at once, not at the next quantum
+./target/release/lilguy status --json     # who is running, and every counter with its attribution
 ./target/release/lilguysd --print-config  # every setting with its default
 ./target/release/lilguysd --print-prompt  # the assembled system prompt, verbatim
 ```
@@ -95,6 +97,9 @@ Every diagnosis this project has needed came out of those two files, and none we
   the face back and the last expression froze on permanently.
 - *"They're silent"* — the slice was twenty-four lines of one image viewer announcing every PNG it
   opened. The models were correctly saying nothing about noise.
+
+`state.json` in the same directory answers what anything cost without reading either — see
+[docs/telemetry.md](docs/telemetry.md). Read it through `lilguy status --json` rather than by eye.
 
 Environment switches: `LILGUYS_DEBUG_HTTP` (provider request and reply), `LILGUYS_DEBUG_MPRIS`
 (every D-Bus media signal and its extracted fields), `LILGUYS_DEBUG_INPUT` (input rectangles),
@@ -146,8 +151,9 @@ Each cost real time. None are visible from the code.
 | `src/voice.rs` | TTS as a command template |
 | `src/config.rs` | the whole configurable surface |
 | `src/log.rs` | the two JSONL sinks |
+| `src/telemetry.rs` | attributed counters, `state.json`, and the OTLP push |
 | `characters/` | shipped characters: persona, palette, size |
-| `packaging/` | the systemd user unit |
+| `packaging/` | the systemd user unit, and the development observability stack |
 | `.cargo/config.toml` | the `cargo lilguy` alias, so the CLI runs without a path or an install |
 
 ## Adding things

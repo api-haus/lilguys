@@ -79,9 +79,11 @@ impl Voice {
     pub fn say(&mut self, text: &str) -> bool {
         let Some(tx) = self.tx.as_ref() else { return false };
         if self.queued >= self.limit {
+            crate::telemetry::count(crate::telemetry::name::DROPS, &[("where", "voice queue")]);
             return false;
         }
         if tx.send(text.to_string()).is_err() {
+            crate::telemetry::count(crate::telemetry::name::DROPS, &[("where", "voice thread")]);
             return false;
         }
         self.queued += 1;

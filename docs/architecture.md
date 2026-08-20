@@ -68,6 +68,9 @@ the next when it has to.
 | notice | per event | none | novelty and dwell filtering, the reflex arc |
 | think | one slice, at most | tokens | the model decides what to actually do |
 
+Each is counted where it happens, attributed to the character that spent it —
+[telemetry.md](telemetry.md).
+
 The reflex clock is the render tick. It drops to 8 Hz only once every character has drifted off the
 edge of the screen. A settled character is not a still one: the idle regiment below keeps breathing,
 swaying and blinking under it, and 8 Hz of that reads as a strobe rather than a saving. Presence is

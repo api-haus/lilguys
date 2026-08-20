@@ -51,6 +51,18 @@ pub enum Intent {
 }
 
 impl Intent {
+    /// The closed set of body capabilities, named once. Five is the whole vocabulary; a sixth
+    /// costs tokens on every turn for every guy and needs an argument in philosophy.md's terms.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Intent::React { .. } => "react",
+            Intent::Think { .. } => "think",
+            Intent::Gesture { .. } => "gesture",
+            Intent::Speak { .. } => "speak",
+            Intent::Focus { .. } => "focus",
+        }
+    }
+
     pub fn summary(&self) -> String {
         match self {
             Intent::React { emotion, intensity, .. } => {
@@ -154,15 +166,22 @@ fn vet_speech(text: &str) -> Result<String, String> {
 
 /// Structural markers of machinery escaping into something a person sees or hears.
 fn vet_leakage(text: &str) -> Result<(), String> {
+    let caught = |why: String| {
+        crate::telemetry::count(
+            crate::telemetry::name::REFUSALS,
+            &[("reason", "speech vetted")],
+        );
+        Err(why)
+    };
     for debris in ['{', '}', '[', ']', '<', '>'] {
         if text.contains(debris) {
-            return Err(format!("contains {debris:?}, looks like markup"));
+            return caught(format!("contains {debris:?}, looks like markup"));
         }
     }
     let lower = text.to_lowercase();
     for tell in ["given the following", "\"name\"", "arguments", "parameters", "json schema"] {
         if lower.contains(tell) {
-            return Err(format!("contains {tell:?}, looks like prompt leakage"));
+            return caught(format!("contains {tell:?}, looks like prompt leakage"));
         }
     }
     Ok(())

@@ -5,6 +5,7 @@ pub mod provider;
 
 use crate::config::{Config, Mind as MindConfig};
 use crate::log;
+use crate::telemetry::{self, name};
 use anyhow::Result;
 use capability::Intent;
 use provider::{Client, Message};
@@ -67,18 +68,20 @@ pub enum ToMind {
 /// Runs the model loop on its own thread. Blocking HTTP never touches the render loop.
 pub fn spawn(
     config: &Config,
+    who: &str,
     provider: &str,
     system: String,
     out: calloop::channel::Sender<Reaction>,
 ) -> Result<mpsc::Sender<ToMind>> {
     let client = Client::new(config.provider_named(provider)?.clone())?;
     let mind = config.mind.clone();
+    let (who, provider) = (who.to_string(), provider.to_string());
     let (tx, rx) = mpsc::channel();
 
     std::thread::Builder::new()
         .name("mind".into())
         .spawn(move || {
-            let mut reactor = Reactor::new(client, mind, system);
+            let mut reactor = Reactor::new(client, mind, system, who, provider);
             while let Ok(ToMind::Tick(q)) = rx.recv() {
                 let reaction = reactor.turn(q);
                 if out.send(reaction).is_err() {
@@ -97,10 +100,14 @@ struct Reactor {
     history: Vec<Message>,
     budget: f32,
     budget_at: Instant,
+    /// Attribution. A spend nobody can pin on a character is a spend nobody can govern.
+    who: String,
+    provider: String,
 }
 
 impl Reactor {
-    fn new(client: Client, config: MindConfig, system: String) -> Self {
+    fn new(client: Client, config: MindConfig, system: String, who: String, provider: String)
+        -> Self {
         Self {
             client,
             budget: config.turns_per_hour * 0.25,
@@ -108,7 +115,14 @@ impl Reactor {
             config,
             system,
             history: Vec::new(),
+            who,
+            provider,
         }
+    }
+
+    /// Every counter this thread raises carries the same pair, so nothing lands anonymous.
+    fn attrs(&self) -> [(&'static str, &str); 2] {
+        [("who", &self.who), ("provider", &self.provider)]
     }
 
     fn afford(&mut self) -> bool {
@@ -134,14 +148,21 @@ impl Reactor {
             error: None,
         };
         if !q.present && !self.config.think_while_away {
+            telemetry::count(name::REFUSALS, &[("who", &self.who), ("reason", "user away")]);
             return reaction;
         }
         if !self.afford() {
             reaction.error = Some("over budget".into());
+            telemetry::count(name::REFUSALS, &[("who", &self.who), ("reason", "over budget")]);
             return reaction;
         }
 
         reaction.compacted = self.compact_if_needed();
+        if reaction.compacted {
+            telemetry::count(name::COMPACTIONS, &[("who", &self.who)]);
+        }
+        // What the window costs going out, which is the figure a bill is made of.
+        telemetry::add(name::TOKENS, self.tokens() as u64, &self.attrs());
         let prompt = q.render();
         self.history.push(Message::user(prompt.clone()));
 
@@ -152,8 +173,10 @@ impl Reactor {
                 // Drop the prompt again so a dead endpoint cannot inflate the window forever.
                 self.history.pop();
                 reaction.error = Some(format!("{e:#}"));
+                let ms = started.elapsed().as_millis();
+                self.meter_turn(ms, "error");
                 log::turn(&prompt, "", &json!(null), &[], &[], self.tokens(), reaction.compacted,
-                          reaction.error.as_deref(), started.elapsed().as_millis());
+                          reaction.error.as_deref(), ms);
                 return reaction;
             }
         };
@@ -179,6 +202,14 @@ impl Reactor {
             reaction.error.get_or_insert_with(|| format!("rejected {} call(s)", rejected.len()));
         }
         reaction.rejected = rejected.clone();
+
+        for intent in &reaction.intents {
+            telemetry::count(name::INTENTS, &[("who", &self.who), ("kind", intent.kind())]);
+        }
+        for _ in &rejected {
+            telemetry::count(name::REFUSALS, &[("who", &self.who), ("reason", "call rejected")]);
+        }
+        self.meter_turn(elapsed, if reaction.error.is_some() { "error" } else { "ok" });
 
         log::turn(
             &prompt,
@@ -208,6 +239,16 @@ impl Reactor {
         all.push(Message::system(self.system.clone()));
         all.extend(self.history.iter().cloned());
         all
+    }
+
+    /// One turn's cost as both a counter and a span, so a slow provider is visible beside what
+    /// the turn actually produced.
+    fn meter_turn(&self, ms: u128, outcome: &str) {
+        let [who, provider] = self.attrs();
+        let attrs = [who, provider, ("outcome", outcome)];
+        telemetry::count(name::TURNS, &attrs);
+        telemetry::record(name::TURN_DURATION, ms as f64, &attrs);
+        telemetry::span("turn", ms, outcome == "error", &attrs);
     }
 
     fn tokens(&self) -> usize {

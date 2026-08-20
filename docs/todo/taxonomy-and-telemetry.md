@@ -1,7 +1,14 @@
 # Taxonomy and telemetry
 
-**Status:** not started. **Why:** plugins compose through a vocabulary, and nobody can see what
-anything costs.
+**Status:** telemetry built, taxonomy started. **Why:** plugins compose through a vocabulary, and
+nobody can see what anything costs.
+
+The counters, `state.json`, `lilguy status` and the closed-set accessors behind their attributes
+are in — [telemetry.md](../telemetry.md) is the reference. Naming an OTLP collector also pushes
+them to the development Grafana stack, which the shape below did not anticipate and which changes
+nothing about it: the local file stays the product, and nothing is sent anywhere the person did
+not start themselves. What is left is the taxonomy as a *contract* — the version, the plugin
+declaration, and `plugin` as the third leg of attribution.
 
 Two problems that look separate and are the same problem: **what things are called**, and **what
 they are doing**. Both are currently implicit — kinds are ad-hoc strings scattered through the
@@ -69,8 +76,13 @@ question without reading them.
 ### Shape
 
 Counters and histograms in memory, snapshotted to `state.json` beside the logs, and readable as
-`lilguy status --json`. No Prometheus, no push endpoint, no daemon of its own — the volume is
-dozens of events a minute and the audience is one person and one CLI.
+`lilguy status --json`. The volume is dozens of events a minute and the audience is one person and
+one CLI, so nothing here needs a daemon of its own.
+
+A development collector is the one exception, and it is opt-in: `[telemetry] otlp` points at a
+localhost OTLP endpoint and the same counters go up as OTLP/JSON over the `ureq` already in the
+tree. Off unless named, and it adds no dependency — a real OpenTelemetry SDK measured at forty
+crates, tokio and hyper among them, for a daemon with no async runtime at all.
 
 ```json
 {
@@ -101,15 +113,18 @@ dozens of events a minute and the audience is one person and one CLI.
 
 ## Work
 
-1. Extract the closed sets into one module that owns the names, and make every existing string
-   reference it. Currently `"focus"` is typed out in several places.
-2. `taxonomy` constant, exposed in `--check`, in protocol frames, and to scripts.
-3. Counter registry with `{tier, guy, plugin}` attribution, incremented where decisions already
-   happen — the gate, the budget, the vetting, the buffers.
-4. `state.json` snapshot on a slow timer and at shutdown.
-5. `lilguy status [--json]`, and the cost lines in `lilguy doctor`.
-6. Plugin identity, so attribution has something to attribute to — arrives with
+1. ~~Counter registry with attribution, incremented where decisions already happen — the gate,
+   the budget, the vetting, the buffers.~~
+2. ~~`state.json` snapshot on a slow timer, and the cost lines in `lilguy status [--json]`.~~
+3. ~~The closed sets each behind one accessor — `Observation::kind`, `Verdict::name`,
+   `Intent::kind`, `Drift::name`, `Emotion::name`.~~ Still typed out as bare strings elsewhere.
+4. Extract those accessors into one module that owns the vocabulary, rather than one per type.
+5. `taxonomy` constant, exposed in `--check`, in protocol frames, and to scripts.
+6. `tier` as an attribute, which needs [model-tiers.md](model-tiers.md); `provider` stands in for
+   it today.
+7. Plugin identity, so attribution has a third leg — arrives with
    [character-packages.md](character-packages.md).
+8. Snapshot at shutdown, not only on the timer.
 
 ## Open questions
 

@@ -71,10 +71,13 @@ The model must support **native tool calls**; lilguys does not parse calls out o
 - [Roadmap](docs/roadmap.md) — phases from here to a scripted cast, each ending in something you
   can see, with sizes.
 - [Planned work](docs/todo/) — the twelve designs those phases implement.
+- [Telemetry](docs/telemetry.md) — what is counted and how to read it, from one command to a
+  Grafana stack you start yourself.
 - [QA](docs/qa-graybox.md) — five manual checks, about three minutes.
 
 Logs land in `~/.local/state/lilguys/`: `turns.jsonl` is every model turn verbatim — slice sent,
 raw reply, intents parsed, calls rejected and why — and `events.jsonl` is every gate ruling.
+`state.json` beside them answers what any of it cost, and `lilguy status` prints the short version.
 
 Grayboxing aids are off by default; turn them on per-kind under `[debug]`. `overhead = 4` floats
 the last few gate rulings above his head — the debugging instrument that moves with him instead of

@@ -7,6 +7,7 @@ use crate::locomotion::Body;
 use crate::mind::capability::Intent;
 use crate::mind::{Quantiser, Reaction, ToMind};
 use crate::sensors::{Bus, Observation};
+use crate::telemetry::name as telemetry;
 use crate::voice::Voice;
 use std::sync::mpsc::Sender;
 use std::time::Instant;
@@ -108,9 +109,16 @@ impl Guy {
             return lines;
         }
         for (verdict, what) in self.attention.consider(sensed, now) {
+            let who: &str = &self.name;
+            crate::telemetry::count(telemetry::OBSERVATIONS, &[("who", who), ("kind", what.kind())]);
+            crate::telemetry::count(telemetry::GATE, &[("who", who), ("verdict", verdict.name())]);
             let already_reflexive = matches!(&what, Observation::Feeling(f) if f.reflective);
             if verdict == Verdict::Emote && !already_reflexive {
                 let (emotion, intensity, hold) = crate::app::reflex(&what);
+                crate::telemetry::count(
+                    telemetry::REFLEXES,
+                    &[("who", who), ("emotion", emotion.name())],
+                );
                 self.body.reflex(emotion, intensity, hold, &what.summary_for(&self.name));
             }
             if what.addressed_to(&self.name) {
