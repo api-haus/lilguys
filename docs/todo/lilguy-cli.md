@@ -29,7 +29,8 @@ exit when anything failed. `lilguysd --check` prints the same report, so there i
 ```
 lilguy setup                    wizard, or fully-flagged non-interactive
 lilguy doctor [--json]          what is wrong, one line per check
-lilguy start | stop | status    the systemd unit, without knowing systemd
+lilguy start | stop | restart   the systemd unit, without knowing systemd
+lilguy status                   who is running, who is on screen
 lilguy say "…"                  push a message at him (also the test hook)
 
 lilguy provider list            what is reachable, and which do native tool calls

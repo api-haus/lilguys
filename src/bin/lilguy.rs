@@ -47,6 +47,8 @@ enum Command {
     Start,
     /// Stop the daemon.
     Stop,
+    /// Stop and start again — the only way a changed config reaches a running daemon.
+    Restart,
     /// Whether anybody is running, and who is on screen.
     Status,
     /// Say something to them. They may answer, and they may not.
@@ -146,6 +148,7 @@ fn run(cli: &Cli) -> Result<bool> {
         Command::Doctor => Ok(doctor(cli.json)),
         Command::Start => did(cli.json, service::start()?),
         Command::Stop => did(cli.json, service::stop()?),
+        Command::Restart => did(cli.json, service::restart()?),
         Command::Status => status(cli.json),
         Command::Say { text, to } => say(cli.json, text, to.as_deref()),
         Command::Provider { what } => provider(cli.json, what),

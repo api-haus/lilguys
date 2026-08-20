@@ -14,7 +14,7 @@ cargo build --release
 ./target/release/lilguy doctor          # every check, one line each, with the fix for what is wrong
 ./target/release/lilguy status          # who is running, who is on screen
 ./target/release/lilguy say "hello"     # talk to them; an answer is optional
-./target/release/lilguy start | stop
+./target/release/lilguy start | stop | restart
 ```
 
 `setup` is `doctor` with permission to fix things: it probes the local endpoints for a model that
@@ -24,6 +24,9 @@ installs the systemd unit. Running it twice changes nothing the second time.
 Every command takes `--json` and exits non-zero when something is wrong, because in practice the
 thing setting this up is somebody's coding agent rather than somebody's afternoon. Nothing is ever
 downloaded or installed without being asked; `--yes` is how a caller answers in advance.
+
+The config is read once, when the daemon starts. Anything that writes it — `setup`, `provider use`,
+`model use`, `voice use` — reaches a running daemon only after `lilguy restart`.
 
 ```bash
 ./target/release/lilguy provider list   # what answers on this machine, and what it can run

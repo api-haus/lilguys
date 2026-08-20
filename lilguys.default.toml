@@ -125,8 +125,8 @@ face and nowhere else.
 [mind]
 enabled = true
 provider = "local"
-quantum = "45s"
-idle_quantum = "10m"
+quantum = "5s"
+idle_quantum = "5m"
 context_tokens = 6000
 keep_recent = 12
 turns_per_hour = 20.0

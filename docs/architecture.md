@@ -500,6 +500,11 @@ running it twice a no-op. Nothing is downloaded or installed without being asked
 there to answer, setup stops and puts the question in its output rather than guessing. See
 [todo/lilguy-cli.md](todo/lilguy-cli.md).
 
+The config is read once, at startup, and nothing watches the file. A daemon is therefore a fixed
+reading of it, which is what makes `--print-config` and `--print-prompt` worth trusting; `restart`
+is how an edit becomes true. Live reload would have to answer what a character mid-sentence does
+when its persona changes underneath it — a question worth having an answer to before the feature.
+
 ### 12.2 The sutra
 
 The system prompt is a **sutra** — a thread, in the literal sense of the word. It is the only part

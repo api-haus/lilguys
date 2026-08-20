@@ -56,6 +56,7 @@ cargo lilguy doctor                       # in this tree; the alias takes any su
 ./target/release/lilguy setup             # doctor, plus permission to fix what it finds
 ./target/release/lilguy doctor            # every check: config, wayland, NATIVE TOOL CALLS, voice
 ./target/release/lilguy start | stop      # the unit if installed, a detached process if not
+./target/release/lilguy restart           # config is read once at startup; this is how it lands
 ./target/release/lilguy say "…"           # a message reaches them at once, not at the next quantum
 ./target/release/lilguysd --print-config  # every setting with its default
 ./target/release/lilguysd --print-prompt  # the assembled system prompt, verbatim

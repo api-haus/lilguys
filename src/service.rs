@@ -134,6 +134,23 @@ pub fn stop() -> Result<String> {
     Ok(format!("sent SIGTERM to {}", pids.iter().map(u32::to_string).collect::<Vec<_>>().join(", ")))
 }
 
+/// Stop, wait for the old process to actually go, then start: the layer surface is released on the
+/// way out, and a new daemon that races the old one loses in ways nobody would blame on a restart.
+pub fn restart() -> Result<String> {
+    if unit().active() {
+        systemctl("restart")?;
+        return Ok(format!("systemctl --user restart {UNIT}"));
+    }
+    let stopped = stop()?;
+    for _ in 0..50 {
+        if !running() {
+            return Ok(format!("{stopped} · {}", start()?));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    bail!("{stopped}, but {DAEMON} is still running five seconds later")
+}
+
 /// Whether the daemon is up, and whether anything will bring it back after a reboot.
 pub fn status_check() -> Check {
     let pids = pids();
