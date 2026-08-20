@@ -52,6 +52,7 @@ ordinary observations.
 ```bash
 cargo build --release
 cargo test --release
+cargo lilguy doctor                       # in this tree; the alias takes any subcommand below
 ./target/release/lilguy setup             # doctor, plus permission to fix what it finds
 ./target/release/lilguy doctor            # every check: config, wayland, NATIVE TOOL CALLS, voice
 ./target/release/lilguy start | stop      # the unit if installed, a detached process if not
@@ -146,6 +147,7 @@ Each cost real time. None are visible from the code.
 | `src/log.rs` | the two JSONL sinks |
 | `characters/` | shipped characters: persona, palette, size |
 | `packaging/` | the systemd user unit |
+| `.cargo/config.toml` | the `cargo lilguy` alias, so the CLI runs without a path or an install |
 
 ## Adding things
 

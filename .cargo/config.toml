@@ -1,0 +1,3 @@
+# Release, because `lilguy start` runs the daemon beside itself and `target/debug/lilguysd` is not it.
+[alias]
+lilguy = "run --quiet --release --bin lilguy --"

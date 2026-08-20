@@ -49,6 +49,7 @@ that target needs the compositor's environment imported — `uwsm` does it, and 
 The daemon's own flags, for when you are working on it:
 
 ```bash
+cargo lilguy doctor                     # `cargo lilguy` is any lilguy subcommand, from this tree
 cargo run --release
 cargo run --release -- --check          # the same report `lilguy doctor` prints
 cargo run --release -- --print-config   # every setting with its default
