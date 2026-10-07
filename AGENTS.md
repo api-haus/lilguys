@@ -10,6 +10,7 @@ compiles and works.
 - [docs/design-space.md](docs/design-space.md) — what Wayland exposes, **measured on real hardware**
 - [docs/telemetry.md](docs/telemetry.md) — what is counted, and the development Grafana stack
 - [docs/qa-graybox.md](docs/qa-graybox.md) — five manual checks, about three minutes
+- [docs/office.md](docs/office.md) — the pivot: guys live in any place, seen through any view; the office laid over a messenger
 
 ## The shape in one paragraph
 
