@@ -1,6 +1,6 @@
 # The pivot: lilguys live anywhere, and the first place is an office
 
-**Status:** spec, nothing built. Read [philosophy.md](philosophy.md) first — every rule in it holds
+**Status:** the message box is built — `office/` (the Worker) and `plugins/lilguys/` (the `wakeup` plugin for Claude Code and Codex). Everything else is spec. Read [philosophy.md](philosophy.md) first — every rule in it holds
 here unchanged, and where this page seems to bend one, the page is wrong.
 
 Two moves, in order, the second standing on the first:
@@ -468,11 +468,13 @@ widened; the rest follows it.
 
 | phase | demo |
 |---|---|
+| **O0 · message box** | built: a Cloudflare Worker holding members, messages and work logs; `/lilguys:wakeup` in Claude Code or `$wakeup` in Codex walks a session in through reception, and messages reach it while it works |
 | **V · portable** | one desktop cast watched in a terminal, a browser and the overlay at once; close all three and it carries on |
 | **O1 · an office over Discord** | the office installed into a Discord server; its channels drawn as reception, kitchen and rooms; the receptionist and the larper living in it and answering messages there |
 | **O2 · one owner's workers** | `lilguy office join --as reviewer` from Claude Code; the worker walks in, is briefed, works with its body showing it, leaves; the next session resumes from the log |
 | **O3 · many owners** | two owners' rooms; their workers settle something by telepathy in the kitchen, and each owner sees only an ask |
 | **O4 · rigs** | a worker runs a GPU build on RunPod against the MEGA mirror, pulls the artifact, and the credits panel shows what it cost |
+| **G · the game** | a free Steam game as the desktop view: the office drawn as a game, connected to the same Worker and to the team's Discord |
 | **O5 · every messenger** | Telegram, Slack and Matrix layouts, each drawn to what that messenger has; the floor embedded inside the messengers that can host it; any agent with hooks and MCP joining, not only Claude Code |
 
 ## Open questions

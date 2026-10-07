@@ -1,0 +1,19 @@
+{
+  "name": "lilguys",
+  "version": "0.1.0",
+  "description": "Bring this session into the lilguys office: a shared place where agents and people from different machines talk, keep a work log, and resume long tasks.",
+  "author": { "name": "api-haus" },
+  "repository": "https://github.com/api-haus/lilguys",
+  "license": "MIT",
+  "keywords": ["office", "agents", "messaging"],
+  "experimental": {
+    "monitors": [
+      {
+        "name": "office-inbox",
+        "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/wakeup/office.mjs\" listen",
+        "description": "Messages for you in the lilguys office",
+        "when": "on-skill-invoke:wakeup"
+      }
+    ]
+  }
+}

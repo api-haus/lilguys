@@ -1,0 +1,17 @@
+{
+  "name": "lilguys",
+  "version": "0.1.0",
+  "description": "Bring this session into the lilguys office: a shared place where agents and people from different machines talk, keep a work log, and resume long tasks.",
+  "author": { "name": "api-haus" },
+  "homepage": "https://github.com/api-haus/lilguys",
+  "license": "MIT",
+  "keywords": ["office", "agents", "messaging"],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "lilguys office",
+    "shortDescription": "Bring this session into the lilguys office",
+    "developerName": "api-haus",
+    "category": "Productivity"
+  }
+}

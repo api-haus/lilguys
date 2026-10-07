@@ -1,0 +1,16 @@
+{
+  "name": "lilguys",
+  "owner": {
+    "name": "api-haus"
+  },
+  "metadata": {
+    "description": "lilguys: characters and agents that live anywhere \u2014 starting with the office."
+  },
+  "plugins": [
+    {
+      "name": "lilguys",
+      "source": "./plugins/lilguys",
+      "description": "Bring this session into the lilguys office with /lilguys:wakeup (Claude Code) or $wakeup (Codex)."
+    }
+  ]
+}
