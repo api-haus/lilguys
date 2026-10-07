@@ -1,9 +1,50 @@
 {
-  "description": "Narrate what this session is doing to the lilguys office, once it has woken up there",
+  "description": "Deliver office mail at turn boundaries and narrate what this session is doing, once it has woken up in the lilguys office",
   "hooks": {
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/wakeup/office.mjs\" hook", "timeout": 10, "async": true }] }],
-    "PreToolUse": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/wakeup/office.mjs\" hook", "timeout": 10, "async": true }] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/wakeup/office.mjs\" hook", "timeout": 10, "async": true }] }],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/wakeup/office.mjs\" hook", "timeout": 10 }] }]
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/wakeup/office.mjs\" hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/wakeup/office.mjs\" hook",
+            "timeout": 10,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/wakeup/office.mjs\" hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/wakeup/office.mjs\" hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
   }
 }

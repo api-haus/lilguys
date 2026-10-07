@@ -15,14 +15,22 @@ type Member = {
   detail: string;
   seen: number;
   present: number;
-  cursor: number;
 };
 
-type Message = { id: number; at: number; room: string; sender: string; recipient: string | null; text: string };
+type Message = { id: number; at: number; room: string; sender: string; recipient: string | null; brief: string; text: string };
+type Mail = Message & { state: "queued" | "open" | "done"; touched: number; reminded: number };
 
 const KITCHEN = "kitchen";
 const BRIEFING_ENTRIES = 20;
-const UNREAD_LIMIT = 50;
+// How many messages may sit open in an agent's attention at once. The rest wait in the mailbox and
+// are delivered as earlier ones are closed.
+const OPEN_LIMIT = 3;
+const BRIEF_CHARS = 80;
+
+const briefOf = (text: string) => {
+  const line = text.trim().split("\n")[0];
+  return line.length > BRIEF_CHARS ? `${line.slice(0, BRIEF_CHARS - 1)}…` : line;
+};
 
 export class Office extends DurableObject<Env> {
   sql = this.ctx.storage.sql;
@@ -34,14 +42,23 @@ export class Office extends DurableObject<Env> {
         CREATE TABLE IF NOT EXISTS members (
           name TEXT PRIMARY KEY, owner TEXT NOT NULL, harness TEXT NOT NULL, room TEXT NOT NULL,
           state TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '',
-          seen INTEGER NOT NULL, present INTEGER NOT NULL DEFAULT 0, cursor INTEGER NOT NULL DEFAULT 0);
+          seen INTEGER NOT NULL, present INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE IF NOT EXISTS messages (
           id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, room TEXT NOT NULL,
-          sender TEXT NOT NULL, recipient TEXT, text TEXT NOT NULL);
+          sender TEXT NOT NULL, recipient TEXT, brief TEXT NOT NULL DEFAULT '', text TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS mail (
+          name TEXT NOT NULL, message INTEGER NOT NULL REFERENCES messages(id),
+          state TEXT NOT NULL DEFAULT 'queued' CHECK (state IN ('queued','open','done')),
+          touched INTEGER NOT NULL DEFAULT 0, reminded INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (name, message));
         CREATE TABLE IF NOT EXISTS log (
           id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, name TEXT NOT NULL,
           kind TEXT NOT NULL CHECK (kind IN ('entry','pending','priority')), text TEXT NOT NULL);
       `);
+      // Databases created before the mailbox.
+      try { this.sql.exec("ALTER TABLE messages ADD COLUMN brief TEXT NOT NULL DEFAULT ''"); } catch {}
+      try { this.sql.exec("ALTER TABLE members DROP COLUMN cursor"); } catch {}
+      this.sql.exec(`UPDATE messages SET brief = substr(text, 1, ${BRIEF_CHARS}) WHERE brief = ''`);
     });
   }
 
@@ -58,30 +75,30 @@ export class Office extends DurableObject<Env> {
     }
   }
 
-  // A worker arrives through reception: it is handed the head of its own log and everything
-  // addressed to it while it was away, then everybody present sees it enter.
+  // A worker arrives through reception and everybody present sees it enter.
   wakeup(name: string, owner: string, harness: string, room?: string) {
-    const known = this.member(name);
-    const at = Date.now();
+    const returning = !!this.member(name);
     this.sql.exec(
       `INSERT INTO members (name, owner, harness, room, seen, present) VALUES (?, ?, ?, ?, ?, 1)
        ON CONFLICT(name) DO UPDATE SET owner = excluded.owner, harness = excluded.harness,
          room = COALESCE(?, members.room), seen = excluded.seen, present = 1, state = 'arrived', detail = ''`,
-      name, owner, harness, room ?? owner, at, room ?? null,
+      name, owner, harness, room ?? owner, Date.now(), room ?? null,
     );
-    const briefing = {
-      returning: !!known,
+    const me = this.member(name)!;
+    this.broadcast({ t: "enter", member: me });
+    return { briefing: { returning, ...this.briefing(name) }, me, present: this.present() };
+  }
+
+  // The folder the receptionist hands over: the head of the identity's own log.
+  briefing(name: string) {
+    return {
       entries: this.sql
         .exec("SELECT at, text FROM log WHERE name = ? AND kind = 'entry' ORDER BY id DESC LIMIT ?", name, BRIEFING_ENTRIES)
         .toArray()
         .reverse(),
       pending: this.latest(name, "pending"),
       priority: this.latest(name, "priority"),
-      unread: this.unread(name),
     };
-    const me = this.member(name)!;
-    this.broadcast({ t: "enter", member: me });
-    return { briefing, me, present: this.present() };
   }
 
   latest(name: string, kind: "pending" | "priority") {
@@ -90,35 +107,74 @@ export class Office extends DurableObject<Env> {
       .toArray()[0] ?? null;
   }
 
-  // What reaches an identity: messages addressed to it, and unaddressed talk in its own room or the
-  // kitchen. Everything else in the building is not its business.
-  unread(name: string): Message[] {
-    const me = this.member(name);
-    if (!me) return [];
-    const rows = this.sql
-      .exec<Message>(
-        `SELECT * FROM (SELECT * FROM messages WHERE id > ? AND sender != ?
-           AND (recipient = ? OR (recipient IS NULL AND room IN (?, ?))) ORDER BY id DESC LIMIT ?) ORDER BY id`,
-        me.cursor, name, name, me.room, KITCHEN, UNREAD_LIMIT,
-      )
-      .toArray();
-    const top = this.sql.exec<{ id: number }>("SELECT COALESCE(MAX(id), 0) AS id FROM messages").one().id;
-    this.sql.exec("UPDATE members SET cursor = ?, seen = ? WHERE name = ?", top, Date.now(), name);
-    return rows;
-  }
-
-  say(sender: string, text: string, to?: string | null, room?: string | null) {
+  // A message is mailed to whoever it is addressed to, or, unaddressed, to everybody whose desk is
+  // in the room it was said in. Kitchen talk is ambient and mailed to nobody.
+  say(sender: string, text: string, to?: string | null, room?: string | null, brief?: string | null) {
     const from = this.member(sender);
     const target = to ? this.member(to) : undefined;
     const where = room ?? target?.room ?? from?.room ?? KITCHEN;
     const msg = this.sql
       .exec<Message>(
-        "INSERT INTO messages (at, room, sender, recipient, text) VALUES (?, ?, ?, ?, ?) RETURNING *",
-        Date.now(), where, sender, to ?? null, text,
+        "INSERT INTO messages (at, room, sender, recipient, brief, text) VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
+        Date.now(), where, sender, to ?? null, brief?.trim() || briefOf(text), text,
       )
       .one();
+    const recipients = to
+      ? [to]
+      : where === KITCHEN
+        ? []
+        : this.sql.exec<{ name: string }>("SELECT name FROM members WHERE room = ? AND name != ?", where, sender).toArray().map((r) => r.name);
+    for (const name of recipients) this.sql.exec("INSERT INTO mail (name, message) VALUES (?, ?)", name, msg.id);
     this.broadcast({ t: "message", message: msg });
+    for (const name of recipients) this.broadcast({ t: "mail", name });
     return msg;
+  }
+
+  mail(name: string, state: Mail["state"], limit = -1): Mail[] {
+    return this.sql
+      .exec<Mail>(
+        "SELECT m.*, mail.state, mail.touched, mail.reminded FROM mail JOIN messages m ON m.id = mail.message WHERE mail.name = ? AND mail.state = ? ORDER BY m.id LIMIT ?",
+        name, state, limit,
+      )
+      .toArray();
+  }
+
+  // Exactly once: each message moves from queued to open in one place, here, and only open messages
+  // up to OPEN_LIMIT. Whoever calls this owns showing what it returns.
+  deliver(name: string) {
+    const room = OPEN_LIMIT - this.mail(name, "open").length;
+    const fresh = room > 0 ? this.mail(name, "queued", room) : [];
+    for (const m of fresh) this.sql.exec("UPDATE mail SET state = 'open' WHERE name = ? AND message = ?", name, m.id);
+    return { delivered: fresh, ...this.box(name) };
+  }
+
+  box(name: string) {
+    return {
+      open: this.mail(name, "open"),
+      queued: this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM mail WHERE name = ? AND state = 'queued'", name).one().n,
+    };
+  }
+
+  // Open messages the agent has neither read again nor closed since they were delivered, each
+  // offered once at the next moment it could act on them.
+  remind(name: string) {
+    const due = this.mail(name, "open").filter((m) => !m.touched && !m.reminded);
+    for (const m of due) this.sql.exec("UPDATE mail SET reminded = 1 WHERE name = ? AND message = ?", name, m.id);
+    return due;
+  }
+
+  // Only what was mailed to this identity can be read or closed by it.
+  read(name: string, id: number) {
+    const hit = this.sql.exec("UPDATE mail SET touched = 1 WHERE name = ? AND message = ? RETURNING message", name, id).toArray();
+    return hit.length ? this.sql.exec<Message>("SELECT * FROM messages WHERE id = ?", id).one() : null;
+  }
+
+  close(name: string, ids: number[]) {
+    const closed = ids.filter(
+      (id) => this.sql.exec("UPDATE mail SET state = 'done' WHERE name = ? AND message = ? AND state != 'done' RETURNING message", name, id).toArray().length,
+    );
+    this.broadcast({ t: "mail", name });
+    return { closed, ...this.box(name) };
   }
 
   activity(name: string, state: string, detail: string) {
@@ -166,7 +222,7 @@ export class Office extends DurableObject<Env> {
   }
 }
 
-const json = (body: unknown, status = 200) => Response.json(body ?? { ok: true }, { status });
+const json = (body: unknown, status = 200) => Response.json(body === undefined ? { ok: true } : body, { status });
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -192,10 +248,28 @@ export default {
     switch (`${request.method} ${url.pathname}`) {
       case "POST /wakeup":
         return missing("name", "owner", "harness") ?? json(await office.wakeup(b.name, b.owner, b.harness, b.room));
-      case "POST /say":
-        return missing("from", "text") ?? json(await office.say(b.from, b.text, b.to, b.room));
-      case "GET /inbox":
-        return missing("name") ?? json(await office.unread(b.name));
+      case "POST /say": {
+        const err = missing("from", "text");
+        if (err) return err;
+        if (b.to === b.from) return json({ error: "a message to yourself is a log entry" }, 400);
+        const msg = await office.say(b.from, b.text, b.to, b.room, b.brief);
+        if (Number.isInteger(b.re)) await office.close(b.from, [b.re]);
+        return json(msg);
+      }
+      case "GET /briefing":
+        return missing("name") ?? json(await office.briefing(b.name));
+      case "POST /deliver":
+        return missing("name") ?? json(await office.deliver(b.name));
+      case "GET /mail":
+        return missing("name") ?? json(await office.box(b.name));
+      case "POST /remind":
+        return missing("name") ?? json(await office.remind(b.name));
+      case "POST /read":
+        if (!Number.isInteger(b.id)) return json({ error: "id must be a message number" }, 400);
+        return missing("name") ?? json(await office.read(b.name, b.id));
+      case "POST /done":
+        if (!Array.isArray(b.ids) || !b.ids.every(Number.isInteger)) return json({ error: "ids must be message numbers" }, 400);
+        return missing("name") ?? json(await office.close(b.name, b.ids));
       case "POST /activity":
         return missing("name", "state") ?? json(await office.activity(b.name, b.state, b.detail ?? ""));
       case "POST /log":

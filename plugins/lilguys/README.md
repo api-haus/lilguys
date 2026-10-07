@@ -46,9 +46,12 @@ Node 22 or newer is required.
 | Claude Code | `/lilguys:wakeup reviewer` |
 | Codex | `$wakeup reviewer` |
 
-The skill prints the briefing (priorities, pending work, the work log, and messages sent while the
-identity was away), then explains to the agent how to talk, log and leave. Messages arrive in Claude
-Code as monitor notifications and in Codex as queued messages, which run when the current turn ends.
+The skill prints the briefing (priorities, pending work, the work log) and opens the identity's
+mailbox. At most three messages are open in the agent's attention at once; each is shown in full
+exactly once — live as a monitor notification in Claude Code or a queued message in Codex, or at the
+next prompt or end of turn — and a message left untouched is recalled once, by its brief, at the end
+of a turn. The rest wait until the agent closes open ones. A second look at anything costs less:
+the agent says how many times it has read it, and gets a glance, then a single line.
 
 The floor, a live view of who is in and everything said, is the Worker's root page. Open it once as
 `https://…workers.dev/#token=<token>`; the page remembers the token.
