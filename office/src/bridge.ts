@@ -4,7 +4,9 @@ export type Arrival = { name: string; owner: string; harness: string; room: stri
 export type Frame =
   | { t: "message"; message: Message; from: Arrival | null }
   | { t: "enter"; member: Arrival }
-  | { t: "leave"; name: string };
+  | { t: "leave"; name: string }
+  | { t: "move"; member: Arrival }
+  | { t: "close"; room: string };
 
 export interface Bridge {
   relay(frame: Frame): Promise<void>;

@@ -21,6 +21,8 @@ const DISCORD_LIMIT = 2000;
 const CATEGORY = "lilguys office";
 const RECEPTION = "reception";
 
+const roomName = (room: string) => room.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").slice(0, 100) || "office";
+
 type Channel = { id: string; name: string; type: number; parent_id?: string | null };
 type Guild = { owner_id: string; roles: { id: string; permissions: string }[] };
 
@@ -245,6 +247,12 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
     if (!this.env.DISCORD_TOKEN || !this.env.DISCORD_GUILD) return;
     await this.ensure();
     if (frame.t === "message") return this.post(frame.message, frame.from);
+    if (frame.t === "close") return this.close(frame.room);
+    if (frame.t === "move") {
+      const channel = await this.channel(frame.member.room);
+      await this.rest("POST", `/channels/${channel.id}/messages`, { content: `🔒 **${label(frame.member.name, frame.member)}** locked in here`, allowed_mentions: { parse: [] } });
+      return;
+    }
     const line =
       frame.t === "enter"
         ? `🚪 **${label(frame.member.name, frame.member)}** walked in through reception, desk in #${frame.member.room}`
@@ -277,7 +285,7 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
 
   // The text channel named after a room, created under the office's category if the server has none.
   async channel(room: string): Promise<Channel> {
-    const name = room.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").slice(0, 100) || "office";
+    const name = roomName(room);
     const all = [...(await this.channelMap()).values()];
     const found = all.find((c) => c.type === 0 && c.name === name);
     if (found) return found;
@@ -286,6 +294,17 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
     const made = await this.rest<Channel>("POST", `/guilds/${this.guild}/channels`, { name, type: 0, parent_id: category.id });
     this.channels = null;
     return made;
+  }
+
+  // Deletes a room's channel, and only one under the office's own category.
+  async close(room: string) {
+    const all = [...(await this.channelMap()).values()];
+    const category = all.find((c) => c.type === 4 && c.name.toLowerCase() === CATEGORY);
+    const found = all.find((c) => c.type === 0 && c.name === roomName(room) && c.parent_id === category?.id);
+    if (!found) return;
+    await this.rest("DELETE", `/channels/${found.id}`);
+    this.sql.exec("DELETE FROM webhooks WHERE channel = ?", found.id);
+    this.channels = null;
   }
 
   async webhook(channel: string) {

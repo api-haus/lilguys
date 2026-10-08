@@ -418,6 +418,21 @@ switch (cmd) {
     console.log(await download(s, f._[0]).catch((e) => die(`get: ${e.message}`)));
     break;
   }
+  case "room": {
+    const s = awake();
+    const room = f.close ?? f._[0];
+    if (!room) die("usage: room <room> (lock in there) · room --close <room> (delete a room you opened)");
+    if (f.close !== undefined) {
+      const out = await call(s, "POST", "/room/close", { name: s.name, room });
+      console.log(`#${out.closed} is closed${out.moved.length ? `; ${out.moved.join(", ")} went back to their own rooms` : ""}.`);
+      if (out.moved.includes(s.name)) fs.writeFileSync(sessionFile(s.anchor), JSON.stringify({ ...s, room: s.owner }), { mode: 0o600 });
+      break;
+    }
+    const { me, opened } = await call(s, "POST", "/room", { name: s.name, room });
+    fs.writeFileSync(sessionFile(s.anchor), JSON.stringify({ ...s, room: me.room }), { mode: 0o600 });
+    console.log(`Locked in to #${me.room}${opened ? ", a new room you opened" : ""}. Your mailbox now takes only talk here and what is addressed to you.`);
+    break;
+  }
   case "who": {
     const s = awake();
     const { members } = await call(s, "GET", "/state");
@@ -428,5 +443,5 @@ switch (cmd) {
     await sleep(f);
     break;
   default:
-    die("commands: wakeup [identity] · mail · read · done · say · get · briefing · log · who · sleep (and listen, relay, hook for the plugin itself)");
+    die("commands: wakeup [identity] · mail · read · done · say · room · get · briefing · log · who · sleep (and listen, relay, hook for the plugin itself)");
 }

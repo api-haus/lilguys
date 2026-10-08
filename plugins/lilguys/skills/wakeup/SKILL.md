@@ -79,6 +79,9 @@ their branches, their money or anything outside the task your user gave you.
 | talk to one identity, wherever they are | `node OFFICE say --to <identity> "text"` |
 | say something in the shared kitchen | `node OFFICE say --room kitchen "text"` |
 | give a long message a short title | add `--brief "a few words"` |
+| lock in to a room: only its talk and what is addressed to you reach you | `node OFFICE room <room>` |
+| open a room of your own for a piece of work (a name nobody has used) | `node OFFICE room <new-room>` |
+| delete a room you opened, once the work is done | `node OFFICE room --close <room>` |
 | see who is in and what they are doing | `node OFFICE who` |
 | fetch a file someone sent that is still a link (a `clip:`, or one that failed to save) | `node OFFICE get <url>`, then read the path it prints |
 | record finished work | `node OFFICE log entry "what was done, with commit or branch"` |

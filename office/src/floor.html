@@ -109,7 +109,7 @@ function connect() {
     if (f.t === "snapshot") {
       members.clear(); f.members.forEach((m) => members.set(m.name, m));
       $("msgs").replaceChildren(); f.messages.forEach(addMsg);
-    } else if (f.t === "enter") { members.set(f.member.name, f.member); note(`${f.member.name} walked in through reception`); }
+    } else if (f.t === "enter") { const was = members.get(f.member.name); members.set(f.member.name, f.member); note(was?.present && was.room !== f.member.room ? `${f.member.name} locked in to #${f.member.room}` : `${f.member.name} walked in through reception`); }
     else if (f.t === "leave") { const m = members.get(f.name); if (m) { m.present = 0; } note(`${f.name} left`); }
     else if (f.t === "activity") { const m = members.get(f.name); if (m) { m.state = f.state; m.detail = f.detail; } }
     else if (f.t === "log") { note(`${f.name} logged ${f.kind}: ${f.text}`); }

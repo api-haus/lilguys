@@ -62,6 +62,7 @@ export class Office extends DurableObject<Env> {
         CREATE TABLE IF NOT EXISTS reactions (
           message INTEGER NOT NULL REFERENCES messages(id), who TEXT NOT NULL, emoji TEXT NOT NULL, at INTEGER NOT NULL,
           PRIMARY KEY (message, who, emoji));
+        CREATE TABLE IF NOT EXISTS rooms (name TEXT PRIMARY KEY, opener TEXT NOT NULL, at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS owners (owner TEXT PRIMARY KEY, icon TEXT NOT NULL UNIQUE);
         CREATE TABLE IF NOT EXISTS people (owner TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, issued INTEGER NOT NULL);
       `);
@@ -281,6 +282,31 @@ export class Office extends DurableObject<Env> {
     this.relay({ t: "leave", name });
   }
 
+  // Locking in: the desk moves to a room, where only its talk and what is addressed to the agent
+  // reach the mailbox. A room nobody has used yet is opened by whoever locks into it first.
+  move(name: string, room: string) {
+    const fresh = !this.sql.exec("SELECT 1 FROM members WHERE room = ? UNION SELECT 1 FROM messages WHERE room = ?", room, room).toArray().length;
+    if (fresh) this.sql.exec("INSERT OR IGNORE INTO rooms (name, opener, at) VALUES (?, ?, ?)", room, name, Date.now());
+    this.sql.exec("UPDATE members SET room = ?, seen = ? WHERE name = ?", room, Date.now(), name);
+    const me = this.member(name)!;
+    this.broadcast({ t: "enter", member: me });
+    this.relay({ t: "move", member: me });
+    return { me, opened: fresh };
+  }
+
+  // Only a room an agent opened can be closed, by any identity of the same owner. Whoever still has a
+  // desk there goes back to their owner's room, and each messenger deletes its channel or topic.
+  closeRoom(name: string, room: string) {
+    const opener = this.sql.exec<{ opener: string }>("SELECT opener FROM rooms WHERE name = ?", room).toArray()[0]?.opener;
+    if (!opener) return { error: `#${room} was not opened by an agent, so it stays` };
+    if (this.member(opener)?.owner !== this.member(name)?.owner) return { error: `#${room} was opened by ${opener}, not one of yours` };
+    const moved = this.sql.exec<{ name: string }>("UPDATE members SET room = owner WHERE room = ? RETURNING name", room).toArray().map((r) => r.name);
+    this.sql.exec("DELETE FROM rooms WHERE name = ?", room);
+    for (const n of moved) this.broadcast({ t: "enter", member: this.member(n) });
+    this.relay({ t: "close", room });
+    return { closed: room, moved };
+  }
+
   present() {
     return this.sql.exec<Member>("SELECT * FROM members WHERE present = 1 ORDER BY room, name").toArray();
   }
@@ -404,6 +430,14 @@ export default {
       case "POST /log":
         if (!["entry", "pending", "priority"].includes(b.kind)) return json({ error: "kind is entry, pending or priority" }, 400);
         return missing("name", "text") ?? json(await office.note(b.name, b.kind, b.text));
+      case "POST /room":
+        return missing("name", "room") ?? json(await office.move(b.name, b.room));
+      case "POST /room/close": {
+        const err = missing("name", "room");
+        if (err) return err;
+        const out = await office.closeRoom(b.name, b.room);
+        return json(out, "error" in out ? 403 : 200);
+      }
       case "POST /sleep":
         return missing("name") ?? json(await office.sleep(b.name, b.entry, b.pending, b.priority));
       case "GET /discord":

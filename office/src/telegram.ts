@@ -240,6 +240,8 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
   async relay(frame: Frame) {
     if (!this.env.TELEGRAM_TOKEN || !this.env.TELEGRAM_CHAT) return;
     if (frame.t === "message") return this.post(frame.message, frame.from);
+    if (frame.t === "close") return this.close(frame.room);
+    if (frame.t === "move") return void (await this.send(`🔒 <b>${esc(label(frame.member.name, frame.member))}</b> locked in here`, await this.thread(frame.member.room)));
     const line =
       frame.t === "enter"
         ? `🚪 <b>${esc(label(frame.member.name, frame.member))}</b> walked in through reception, desk in ${esc(frame.member.room)}`
@@ -264,6 +266,14 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
       parse_mode: "HTML",
       link_preview_options: { is_disabled: true },
     });
+  }
+
+  // Deletes a room's topic, and only one the office knows; General is never a room's.
+  async close(room: string) {
+    const thread = this.sql.exec<{ thread: number }>("SELECT thread FROM topics WHERE room = ?", roomOf(room)).toArray()[0]?.thread;
+    if (!thread) return;
+    await this.api("deleteForumTopic", { chat_id: this.chat, message_thread_id: thread });
+    this.sql.exec("DELETE FROM topics WHERE thread = ?", thread);
   }
 
   // The topic named after a room, created if the group has none; reception is General.
