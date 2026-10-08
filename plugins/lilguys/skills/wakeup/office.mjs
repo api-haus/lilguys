@@ -40,6 +40,14 @@ const alive = (pid) => {
 };
 
 const sessionFile = (pid) => path.join(STATE, `${pid}.json`);
+const listenerFile = (pid) => path.join(STATE, `${pid}.listener`);
+const listening = (pid) => {
+  try {
+    return alive(Number(fs.readFileSync(listenerFile(pid), "utf8")));
+  } catch {
+    return false;
+  }
+};
 function session(anchor = harnessPid()) {
   if (!anchor) return null;
   try {
@@ -72,7 +80,7 @@ function die(msg) {
   process.exit(1);
 }
 
-async function call(s, method, route, body) {
+async function call(s, method, route, body, fatal = true) {
   const url = new URL(s.url + route);
   if (method === "GET" && body) for (const [k, v] of Object.entries(body)) url.searchParams.set(k, v);
   const res = await fetch(url, {
@@ -81,8 +89,11 @@ async function call(s, method, route, body) {
     body: method === "POST" ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(10_000),
   });
-  const out = await res.json();
-  if (!res.ok) die(`${route}: ${out.error ?? res.status}`);
+  const out = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+  if (!res.ok) {
+    if (fatal) die(`${route}: ${out.error ?? res.status}`);
+    throw new Error(`${route}: ${out.error ?? res.status}`);
+  }
   return out;
 }
 
@@ -172,20 +183,34 @@ async function wakeup(f) {
   for (const m of box.delivered) console.log(`${full(m)}\n`);
   const rest = mailbox(box, box.delivered.map((m) => m.id));
   if (rest) console.log(`${rest}\n`);
+  if (anchor.harness === "claude") {
+    for (let i = 0; i < 5 && !listening(anchor.pid); i++) await new Promise((r) => setTimeout(r, 1000));
+    if (!listening(anchor.pid)) {
+      console.log(`NO LIVE INBOX: messages reach you only at prompts and turn ends. Start one now with the Monitor tool, persistent, running: node ${import.meta.filename} listen\n`);
+    }
+  }
   const others = present.filter((m) => m.name !== name);
   console.log(others.length ? `In the office now: ${others.map((m) => `${m.name} (${m.owner}, #${m.room})`).join(", ")}` : "Nobody else is in.");
 }
 
 // Waits for this session to wake, then hands every newly delivered message to `show` until the
 // session sleeps or the harness exits.
+// A failed request never ends the follower: the office may be mid-deploy, or the network down.
 async function follow(anchor, show) {
+  fs.mkdirSync(STATE, { recursive: true });
+  fs.writeFileSync(listenerFile(anchor.pid), String(process.pid));
   let s;
   while (!(s = session(anchor))) {
     if (!alive(anchor.pid)) return;
     await new Promise((r) => setTimeout(r, 1000));
   }
   const pull = async () => {
-    for (const m of (await call(s, "POST", "/deliver", { name: s.name })).delivered) await show(full(m), s);
+    s = session(anchor) ?? s;
+    try {
+      for (const m of (await call(s, "POST", "/deliver", { name: s.name }, false)).delivered) await show(full(m), s);
+    } catch (e) {
+      console.error(`office: ${e.message}`);
+    }
   };
   for (;;) {
     if (!session(anchor) || !alive(anchor.pid)) return;
@@ -193,7 +218,8 @@ async function follow(anchor, show) {
       const ws = new WebSocket(`${s.url.replace(/^http/, "ws")}/ws?token=${encodeURIComponent(s.token)}`);
       const check = setInterval(() => {
         if (!session(anchor) || !alive(anchor.pid)) ws.close();
-      }, 5000);
+        else pull();
+      }, 60_000);
       ws.onopen = pull;
       ws.onmessage = async (e) => {
         const frame = JSON.parse(e.data);

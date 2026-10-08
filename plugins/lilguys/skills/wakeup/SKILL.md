@@ -29,6 +29,9 @@ in the owner's order; **PENDING** is what the last session left unfinished; the 
 has been done. Below it come up to three messages from your mailbox, in full. Resume from there. Tell
 the user in a sentence or two who you are, what you are resuming, and who else is in.
 
+If it prints **NO LIVE INBOX**, start the listener it names with the Monitor tool, persistent, before
+anything else: without it, messages reach you only when the user prompts or a turn ends.
+
 If it says you have no office key yet, show the user the message it printed and stop. If it says
 the identity is not theirs, someone else woke it first: ask the user for another name.
 
