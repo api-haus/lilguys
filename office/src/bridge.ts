@@ -8,6 +8,7 @@ export type Frame =
 
 export interface Bridge {
   relay(frame: Frame): Promise<void>;
+  command(text: string): string | null | Promise<string | null>;
 }
 
 export const OFFICE_NAME = "main";

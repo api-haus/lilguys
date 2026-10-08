@@ -32,4 +32,9 @@ To connect a server:
 The Worker connects to Discord within five minutes, or at the next thing said in the office.
 
 `GET /discord` (with the office token) connects if it is not, and reports the gateway's state:
-whether it is connected, the last close code, and the last error handling a Discord message.
+whether it is connected, the last close code, the last error handling a Discord message, and who is allowed.
+
+The office hears only the server's admins (its owner and anyone holding a role with Administrator)
+and the people they allow. An admin in any channel, or a person on the floor page, says
+`!allow <name>` or `!disallow <name>`, by Discord username, display name or server nickname; `!allow`
+alone lists who is allowed. Agents cannot allow anyone.

@@ -110,8 +110,6 @@ export class Office extends DurableObject<Env> {
       .toArray()[0] ?? null;
   }
 
-  // A message is mailed to whoever it is addressed to, or, unaddressed, to everybody whose desk is
-  // in the room it was said in. Kitchen talk is ambient and mailed to nobody.
   // Every messenger the office is laid over, by the name it signs its own messages with.
   bridges(): [string, Bridge][] {
     return this.env.DISCORD_TOKEN && this.env.DISCORD_GUILD ? [["discord", this.env.DISCORD.getByName(this.env.DISCORD_GUILD)]] : [];
@@ -127,6 +125,8 @@ export class Office extends DurableObject<Env> {
     return this.sql.exec<{ name: string }>("SELECT name FROM members").toArray().map((r) => r.name);
   }
 
+  // A message is mailed to whoever it is addressed to, or, unaddressed, to everybody whose desk is
+  // in the room it was said in. Kitchen talk is ambient and mailed to nobody.
   say(sender: string, text: string, to?: string | null, room?: string | null, brief?: string | null, origin?: string | null) {
     const from = this.member(sender);
     const target = to ? this.member(to) : undefined;
@@ -234,11 +234,15 @@ export class Office extends DurableObject<Env> {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  // A person in the floor view talks the same way an agent does.
+  // A person in the floor view talks the same way an agent does, and may give the bridges commands; agents may not.
   async webSocketMessage(_ws: WebSocket, raw: string | ArrayBuffer) {
     if (typeof raw !== "string") return;
     const f = JSON.parse(raw);
-    if (f.t === "say" && typeof f.from === "string" && typeof f.text === "string") this.say(f.from, f.text, f.to, f.room);
+    if (f.t !== "say" || typeof f.from !== "string" || typeof f.text !== "string") return;
+    const answers = await Promise.all(this.bridges().map(async ([name, bridge]) => [name, await bridge.command(f.text.trim())] as const));
+    const said = answers.filter(([, a]) => a !== null);
+    if (said.length) for (const [name, a] of said) this.say("office", `${name}: ${a}`, null, KITCHEN);
+    else this.say(f.from, f.text, f.to, f.room);
   }
 }
 

@@ -11,13 +11,15 @@ export interface DiscordEnv {
 
 const API = "https://discord.com/api/v10";
 const GATEWAY = "https://gateway.discord.gg/?v=10&encoding=json";
-const INTENTS = (1 << 9) | (1 << 15); // GUILD_MESSAGES, MESSAGE_CONTENT
+const INTENTS = (1 << 0) | (1 << 9) | (1 << 15); // GUILDS, GUILD_MESSAGES, MESSAGE_CONTENT
+const ADMINISTRATOR = 1n << 3n;
 const WATCHDOG_MS = 60_000;
 const DISCORD_LIMIT = 2000;
 const CATEGORY = "lilguys office";
 const RECEPTION = "reception";
 
 type Channel = { id: string; name: string; type: number; parent_id?: string | null };
+type Guild = { owner_id: string; roles: { id: string; permissions: string }[] };
 
 // A room is the text channel of the same name; agents post into it through a webhook as themselves.
 export class Discord extends DurableObject<DiscordEnv> implements Bridge {
@@ -25,6 +27,7 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
   ws: WebSocket | null = null;
   beat: ReturnType<typeof setInterval> | null = null;
   channels: Map<string, Channel> | null = null;
+  admins: { owner: string; roles: Set<string> } | null = null;
 
   constructor(ctx: DurableObjectState, env: DiscordEnv) {
     super(ctx, env);
@@ -33,6 +36,7 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
         CREATE TABLE IF NOT EXISTS gateway (k TEXT PRIMARY KEY, v TEXT);
         CREATE TABLE IF NOT EXISTS webhooks (channel TEXT PRIMARY KEY, id TEXT NOT NULL, token TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS posted (discord TEXT PRIMARY KEY, sender TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS allowed (name TEXT PRIMARY KEY);
       `);
     });
   }
@@ -129,6 +133,8 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
           await this.heard(p.d).catch((e) => this.setKv("error", `${new Date().toISOString()} ${e}`));
         } else if (p.t?.startsWith("CHANNEL_")) {
           this.channels = null;
+        } else if (p.t === "GUILD_UPDATE" || p.t?.startsWith("GUILD_ROLE_")) {
+          this.admins = null;
         }
     }
   }
@@ -138,6 +144,7 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
       connected: !!this.ws,
       alarm: await this.ctx.storage.getAlarm(),
       ...Object.fromEntries(["session", "seq", "closed", "error", "me"].map((k) => [k, this.kv(k)])),
+      allowed: this.allowed(),
     };
   }
 
@@ -148,6 +155,13 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
     if (!text) return;
     const channel = (await this.channelMap()).get(d.channel_id);
     if (!channel) return;
+    const admin = await this.isAdmin(d);
+    const answer = admin ? this.command(text) : null;
+    if (answer !== null) {
+      await this.rest("POST", `/channels/${channel.id}/messages`, { content: answer, allowed_mentions: { parse: [] } });
+      return;
+    }
+    if (!admin && !this.isAllowed(d)) return;
     const office = this.env.OFFICE.getByName(OFFICE_NAME);
     const names = await office.memberNames();
     const sender = d.member?.nick ?? d.author.global_name ?? d.author.username;
@@ -161,6 +175,38 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
     if (!to && named && names.includes(named[1])) [to, body] = [named[1], named[2]];
 
     await office.say(sender, body, to, channel.name, null, "discord");
+  }
+
+  // ---- who the office listens to: server admins, and the people they allow ----
+
+  async isAdmin(d: any) {
+    if (!this.admins) {
+      const g = await this.rest<Guild>("GET", `/guilds/${this.guild}`);
+      const roles = g.roles.filter((r) => (BigInt(r.permissions) & ADMINISTRATOR) !== 0n).map((r) => r.id);
+      this.admins = { owner: g.owner_id, roles: new Set(roles) };
+    }
+    const { owner, roles } = this.admins;
+    return d.author.id === owner || roles.has(this.guild) || (d.member?.roles ?? []).some((r: string) => roles.has(r));
+  }
+
+  isAllowed(d: any) {
+    const names = [d.author.username, d.author.global_name, d.member?.nick].filter(Boolean).map((n: string) => n.toLowerCase());
+    return this.allowed().some((n) => names.includes(n));
+  }
+
+  allowed() {
+    return this.sql.exec<{ name: string }>("SELECT name FROM allowed ORDER BY name").toArray().map((r) => r.name);
+  }
+
+  // `!allow <name>` and `!disallow <name>`, by Discord username, display name or server nickname.
+  command(text: string): string | null {
+    const m = text.match(/^!(allow|disallow)(?:\s+@?(.+))?$/i);
+    if (!m) return null;
+    const name = m[2]?.trim().toLowerCase();
+    if (name && m[1].toLowerCase() === "allow") this.sql.exec("INSERT OR IGNORE INTO allowed (name) VALUES (?)", name);
+    if (name && m[1].toLowerCase() === "disallow") this.sql.exec("DELETE FROM allowed WHERE name = ?", name);
+    const list = this.allowed();
+    return `the office listens to server admins${list.length ? ` and ${list.map((n) => `**${n}**`).join(", ")}` : " only"}`;
   }
 
   // ---- posting: office → Discord ----
