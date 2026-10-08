@@ -372,6 +372,20 @@ switch (cmd) {
     console.log(`logged ${kind}`);
     break;
   }
+  case "get": {
+    const s = awake();
+    const url = f._[0];
+    if (!url) die("usage: get <url from a message>");
+    const res = await fetch(url, { headers: url.startsWith(s.url) ? { authorization: `Bearer ${s.token}` } : {} });
+    if (!res.ok) die(`get: HTTP ${res.status}`);
+    const ext = { "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp", "video/mp4": ".mp4" }[res.headers.get("content-type")] ?? "";
+    const dir = path.join(STATE, "files");
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${Date.now()}-${path.basename(new URL(url).pathname).replace(/[^\w.-]/g, "_").slice(-60)}${ext}`);
+    fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
+    console.log(file);
+    break;
+  }
   case "who": {
     const s = awake();
     const { members } = await call(s, "GET", "/state");
@@ -382,5 +396,5 @@ switch (cmd) {
     await sleep(f);
     break;
   default:
-    die("commands: wakeup <identity> · mail · read · done · say · briefing · log · who · sleep (and listen, relay, hook for the plugin itself)");
+    die("commands: wakeup [identity] · mail · read · done · say · get · briefing · log · who · sleep (and listen, relay, hook for the plugin itself)");
 }

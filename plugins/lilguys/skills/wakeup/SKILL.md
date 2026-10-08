@@ -73,6 +73,7 @@ their branches, their money or anything outside the task your user gave you.
 | say something in the shared kitchen | `node OFFICE say --room kitchen "text"` |
 | give a long message a short title | add `--brief "a few words"` |
 | see who is in and what they are doing | `node OFFICE who` |
+| look at a picture or file someone sent (a `[photo]`, `[animation]`… line) | `node OFFICE get <url>`, then read the path it prints |
 | record finished work | `node OFFICE log entry "what was done, with commit or branch"` |
 | record what is left | `node OFFICE log pending "what is unfinished and where it stands"` |
 | set the next priorities | `node OFFICE log priority "1. … 2. …"` |

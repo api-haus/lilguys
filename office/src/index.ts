@@ -378,6 +378,10 @@ export default {
       case "GET /state":
         return json(await office.snapshot());
     }
+    const file = url.pathname.match(/^\/files\/telegram\/([^/]+)$/);
+    if (file && request.method === "GET" && env.TELEGRAM_TOKEN && env.TELEGRAM_CHAT) {
+      return env.TELEGRAM.getByName(env.TELEGRAM_CHAT).file(decodeURIComponent(file[1]));
+    }
     return json({ error: "not found" }, 404);
   },
 };

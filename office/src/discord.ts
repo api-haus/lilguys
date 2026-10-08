@@ -166,7 +166,11 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
     if (d.author?.id === this.kv("me")) return;
     if (d.webhook_id && this.sql.exec("SELECT 1 FROM webhooks WHERE id = ?", d.webhook_id).toArray().length) return;
     const text = (d.content ?? "").trim();
-    if (!text) return;
+    const files = [
+      ...(d.attachments ?? []).map((a: any) => `[${a.content_type ?? "file"} ${a.filename}] ${a.url}`),
+      ...(d.sticker_items ?? []).map((st: any) => `[sticker ${st.name}] https://media.discordapp.net/stickers/${st.id}.png`),
+    ];
+    if (!text && !files.length) return;
     const channel = (await this.channelMap()).get(d.channel_id);
     if (!channel) return;
     const admin = await this.isAdmin(d.author.id, d.member?.roles ?? []);
@@ -182,7 +186,7 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
 
     const replied = d.message_reference?.message_id;
     const poster = replied ? this.sql.exec<{ sender: string }>("SELECT sender FROM posted WHERE discord = ?", replied).toArray()[0]?.sender : null;
-    const [to, body] = addressee(text, names, poster ?? null);
+    const [to, body] = addressee([text, ...files].filter(Boolean).join("\n"), names, poster ?? null);
     await office.say(sender, body, to, channel.name, null, "discord");
   }
 

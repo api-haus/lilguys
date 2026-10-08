@@ -97,7 +97,8 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     const created = msg.forum_topic_created?.name ?? msg.forum_topic_edited?.name;
     if (created && thread) return this.learn(created, thread);
     const text = (msg.text ?? msg.caption ?? "").trim();
-    if (!text) return;
+    const files = this.attachments(msg);
+    if (!text && !files.length) return;
 
     const admin = String(msg.sender_chat?.id) === this.chat || (await this.isAdmin(msg.from?.id));
     const answer = admin ? command(this.sql, text) : null;
@@ -110,8 +111,29 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     const replied = msg.reply_to_message?.message_id;
     const poster = replied ? this.sql.exec<{ sender: string }>("SELECT sender FROM posted WHERE message = ?", replied).toArray()[0]?.sender : null;
     const office = this.env.OFFICE.getByName(OFFICE_NAME);
-    const [to, body] = addressee(text, await office.memberNames(), poster ?? null);
+    const [to, body] = addressee([text, ...files].filter(Boolean).join("\n"), await office.memberNames(), poster ?? null);
     await office.say(full || from.username || "someone", body, to, room, null, "telegram");
+  }
+
+  // Each file a message carries, as a line naming its kind and where the office serves it to keys.
+  attachments(msg: any) {
+    const url = (id: string) => `${this.env.OFFICE_URL}/files/telegram/${encodeURIComponent(id)}`;
+    const preview = (f: any) => (f?.thumbnail ? ` (still: ${url(f.thumbnail.file_id)})` : "");
+    const out: string[] = [];
+    if (msg.photo?.length) out.push(`[photo] ${url(msg.photo.at(-1).file_id)}`);
+    for (const kind of ["animation", "video", "video_note", "sticker", "document", "audio", "voice"]) {
+      const f = msg[kind];
+      if (f && !(kind === "document" && msg.animation)) out.push(`[${kind}${f.file_name ? ` ${f.file_name}` : ""}] ${url(f.file_id)}${preview(f)}`);
+    }
+    return out;
+  }
+
+  // Streams a file the bot can see, so its token never leaves the Worker.
+  async file(id: string) {
+    const f = await this.api<{ file_path?: string }>("getFile", { file_id: id }).catch(() => null);
+    if (!f?.file_path) return new Response("not available", { status: 404 });
+    const res = await fetch(`https://api.telegram.org/file/bot${this.env.TELEGRAM_TOKEN}/${f.file_path}`);
+    return new Response(res.body, { status: res.status, headers: { "content-type": res.headers.get("content-type") ?? "application/octet-stream" } });
   }
 
   learn(name: string, thread: number) {
