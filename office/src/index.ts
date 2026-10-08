@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import page from "./floor.html";
-import { type Bridge, type Frame, type Message, OFFICE_NAME } from "./bridge";
+import { type Bridge, type Frame, type Message, OFFICE_NAME, ownerIcon } from "./bridge";
 import { Discord, type DiscordEnv } from "./discord";
 import { Telegram, type TelegramEnv, webhookSecret } from "./telegram";
 
@@ -62,11 +62,13 @@ export class Office extends DurableObject<Env> {
         CREATE TABLE IF NOT EXISTS reactions (
           message INTEGER NOT NULL REFERENCES messages(id), who TEXT NOT NULL, emoji TEXT NOT NULL, at INTEGER NOT NULL,
           PRIMARY KEY (message, who, emoji));
+        CREATE TABLE IF NOT EXISTS owners (owner TEXT PRIMARY KEY, icon TEXT NOT NULL UNIQUE);
         CREATE TABLE IF NOT EXISTS people (owner TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, issued INTEGER NOT NULL);
       `);
       // Databases created before the mailbox.
       try { this.sql.exec("ALTER TABLE messages ADD COLUMN brief TEXT NOT NULL DEFAULT ''"); } catch {}
       try { this.sql.exec("ALTER TABLE members DROP COLUMN cursor"); } catch {}
+      for (const { owner } of this.sql.exec<{ owner: string }>("SELECT owner FROM members GROUP BY owner ORDER BY MIN(seen)").toArray()) this.icon(owner);
       this.sql.exec(`UPDATE messages SET brief = substr(text, 1, ${BRIEF_CHARS}) WHERE brief = ''`);
     });
   }
@@ -91,8 +93,17 @@ export class Office extends DurableObject<Env> {
     return m ? m.owner === owner : claim || name === owner;
   }
 
-  member(name: string): Member | undefined {
-    return this.sql.exec<Member>("SELECT * FROM members WHERE name = ?", name).toArray()[0];
+  member(name: string): (Member & { icon: string }) | undefined {
+    const m = this.sql.exec<Member>("SELECT * FROM members WHERE name = ?", name).toArray()[0];
+    return m && { ...m, icon: this.icon(m.owner) };
+  }
+
+  icon(owner: string) {
+    const known = this.sql.exec<{ icon: string }>("SELECT icon FROM owners WHERE owner = ?", owner).toArray()[0]?.icon;
+    if (known) return known;
+    const icon = ownerIcon(owner, this.sql.exec<{ icon: string }>("SELECT icon FROM owners").toArray().map((r) => r.icon));
+    this.sql.exec("INSERT INTO owners (owner, icon) VALUES (?, ?)", owner, icon);
+    return icon;
   }
 
   broadcast(frame: object) {
@@ -276,7 +287,7 @@ export class Office extends DurableObject<Env> {
 
   snapshot() {
     return {
-      members: this.sql.exec<Member>("SELECT * FROM members ORDER BY room, name").toArray(),
+      members: this.sql.exec<Member>("SELECT * FROM members ORDER BY room, name").toArray().map((m) => ({ ...m, icon: this.icon(m.owner) })),
       messages: this.sql.exec<Message>("SELECT * FROM (SELECT * FROM messages ORDER BY id DESC LIMIT 200) ORDER BY id").toArray(),
     };
   }

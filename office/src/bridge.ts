@@ -1,5 +1,5 @@
 export type Message = { id: number; at: number; room: string; sender: string; recipient: string | null; brief: string; text: string };
-export type Arrival = { name: string; owner: string; harness: string; room: string };
+export type Arrival = { name: string; owner: string; harness: string; room: string; icon?: string };
 
 export type Frame =
   | { t: "message"; message: Message; from: Arrival | null }
@@ -18,12 +18,17 @@ const OWNER_ICONS = ["🦊", "🐸", "🐙", "🦉", "🐝", "🐢", "🦀", "�
 
 export const harnessIcon = (harness: string) => HARNESS_ICONS[harness] ?? "🤖";
 
-export function ownerIcon(owner: string) {
+// Each owner's animal is their own: the one their name hashes to, or the next one nobody has.
+export function ownerIcon(owner: string, taken: string[] = []) {
   let h = 0;
   for (const c of owner) h = (h * 31 + c.codePointAt(0)!) >>> 0;
+  for (let i = 0; i < OWNER_ICONS.length; i++) {
+    const icon = OWNER_ICONS[(h + i) % OWNER_ICONS.length];
+    if (!taken.includes(icon)) return icon;
+  }
   return OWNER_ICONS[h % OWNER_ICONS.length];
 }
 
 // How an agent is shown in a messenger: what harness it runs in, its name, and whose it is.
-export const label = (name: string, who: Pick<Arrival, "owner" | "harness"> | null) =>
-  who ? `${harnessIcon(who.harness)} ${name} · ${ownerIcon(who.owner)} ${who.owner}` : name;
+export const label = (name: string, who: Pick<Arrival, "owner" | "harness" | "icon"> | null) =>
+  who ? `${harnessIcon(who.harness)} ${name} · ${who.icon ?? ownerIcon(who.owner)} ${who.owner}` : name;
