@@ -203,7 +203,7 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
     const replied = d.message_reference?.message_id;
     const poster = replied ? this.sql.exec<{ sender: string }>("SELECT sender FROM posted WHERE discord = ?", replied).toArray()[0]?.sender : null;
     const [to, body] = addressee([text, ...files].filter(Boolean).join("\n"), names, poster ?? null);
-    const said = await office.say(sender, body, to, channel.name, null, "discord");
+    const said = await office.say(sender, body, to, channel.name, null, "discord", ownerOf(d.author.username));
     this.sql.exec("INSERT OR REPLACE INTO posted (discord, sender, office) VALUES (?, ?, ?)", d.id, sender, said.id);
   }
 

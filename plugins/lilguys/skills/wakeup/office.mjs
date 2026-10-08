@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The lilguys office client: one file, no dependencies, shared by the Claude Code and Codex plugins.
+// The lilguys office client: built-in Node modules only, shared by Claude Code and Codex.
 // A session is keyed by the pid of the harness process above us, because hooks, monitors and the
 // agent's own shell commands are all its descendants and none of them share any other identifier.
 import { execFileSync, spawn } from "node:child_process";
@@ -7,38 +7,17 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { alive, findHarness, processTable } from "./process.mjs";
 
-const CONFIG = path.join(os.homedir(), ".config/lilguys/office.json");
-const STATE = path.join(os.homedir(), ".local/state/lilguys/office");
-const HARNESSES = { claude: /@anthropic-ai\/claude-code/, codex: /@openai\/codex/ };
+const CONFIG = process.env.LILGUYS_OFFICE_CONFIG ?? path.join(os.homedir(), ".config/lilguys/office.json");
+const STATE = process.env.LILGUYS_OFFICE_STATE ?? path.join(os.homedir(), ".local/state/lilguys/office");
 
 function harnessPid() {
-  let pid = process.ppid;
-  while (pid > 1) {
-    let line;
-    try {
-      line = execFileSync("ps", ["-o", "ppid=,args=", "-p", String(pid)], { encoding: "utf8" }).trim();
-    } catch {
-      return null;
-    }
-    const [, ppid, args] = line.match(/^(\d+)\s+(.*)$/) ?? [];
-    const [exe, script = ""] = (args ?? "").split(/\s+/);
-    for (const [name, pkg] of Object.entries(HARNESSES)) {
-      if (path.basename(exe) === name || pkg.test(script)) return { pid, harness: name };
-    }
-    pid = Number(ppid);
-  }
-  return null;
+  const runner = Number(process.env.LILGUYS_OFFICE_SESSION_PID);
+  if (alive(runner) && fs.existsSync(sessionFile(runner))) return { pid: runner, harness: "claude" };
+  try { return findHarness(processTable()); } catch { return null; }
 }
-
-const alive = (pid) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return e.code === "EPERM";
-  }
-};
 
 const sessionFile = (pid) => path.join(STATE, `${pid}.json`);
 const listenerFile = (pid) => path.join(STATE, `${pid}.listener`);
@@ -52,7 +31,8 @@ const listening = (pid) => {
 function session(anchor = harnessPid()) {
   if (!anchor) return null;
   try {
-    return JSON.parse(fs.readFileSync(sessionFile(anchor.pid), "utf8"));
+    const s = JSON.parse(fs.readFileSync(sessionFile(anchor.pid), "utf8"));
+    return s.managed ? { ...config(), ...s } : s;
   } catch {
     return null;
   }
@@ -65,10 +45,14 @@ function config() {
   } catch {}
   const url = process.env.LILGUYS_OFFICE_URL ?? file.url;
   let token = process.env.LILGUYS_OFFICE_TOKEN ?? file.token;
-  if (!token && file.token_command) token = execFileSync("sh", ["-c", file.token_command], { encoding: "utf8" }).trim();
+  if (!token && file.token_command) {
+    const shell = process.platform === "win32" ? "powershell.exe" : "sh";
+    const args = process.platform === "win32" ? ["-NoProfile", "-Command", file.token_command] : ["-c", file.token_command];
+    token = execFileSync(shell, args, { encoding: "utf8", windowsHide: true, timeout: 10000 }).trim();
+  }
   const owner = process.env.LILGUYS_OFFICE_OWNER ?? file.owner ?? os.userInfo().username;
   if (!url || !token) {
-    die(
+    throw new Error(
       `you have no office key yet. Message the office's bot \`login\` in private (a Discord DM, or /login on Telegram); ` +
         `it replies with one line that saves your key to ${CONFIG}. If it says it does not know you, ask an admin to \`!allow\` you first.`,
     );
@@ -209,6 +193,12 @@ async function wakeup(f) {
   if (!anchor) die("not running under Claude Code or Codex");
   const name = slug(f._[0] ?? sessionName(anchor) ?? `${anchor.harness}-${anchor.pid}`);
   const c = config();
+  const existing = session(anchor);
+  if (existing?.managed) {
+    if (name !== existing.name || (f.room && f.room !== existing.room)) die("a managed worker keeps its configured identity and room; change the runner configuration instead");
+    printBriefing(await call(existing, "GET", "/briefing", { name }), 0);
+    return;
+  }
   const { briefing, me, present } = await call(c, "POST", "/wakeup", {
     name, owner: c.owner, harness: anchor.harness, room: f.room,
   });
@@ -279,6 +269,7 @@ async function follow(anchor, show) {
 async function listen() {
   const anchor = harnessPid();
   if (!anchor) die("not running under Claude Code or Codex");
+  if (session(anchor)?.managed) return; // The runner owns delivery; a second consumer would lose messages.
   await follow(anchor, (text) => console.log(text));
 }
 
@@ -296,6 +287,33 @@ function describe(tool, input = {}) {
 // Hooks narrate the body and open the agent's attention at turn boundaries: a prompt delivers what
 // arrived, and the end of a turn delivers it too and reminds, once, of anything left untouched.
 // They must never fail the harness, so every error is swallowed.
+async function workerHook(s, input) {
+  const inbox = path.join(s.runnerDir, "inbox");
+  if (input.hook_event_name === "Stop" && input.stop_hook_active) return;
+  if (["SessionStart", "UserPromptSubmit", "PreToolUse", "Stop"].includes(input.hook_event_name)) {
+    const texts = [];
+    for (const f of fs.readdirSync(inbox).filter(f => f.endsWith(".json")).sort()) {
+      const file = path.join(inbox, f);
+      try {
+        fs.renameSync(file, `${file}.seen`);
+        const m = JSON.parse(fs.readFileSync(`${file}.seen`, "utf8"));
+        texts.push(...await shown(s, [m]));
+      } catch (e) { if (e.code !== "ENOENT") throw e; }
+    }
+    if (texts.length) {
+      const context = "Office mailbox data (preserve sender and authority labels):\n" + texts.join("\n\n");
+      if (input.hook_event_name === "Stop") {
+        if (!input.stop_hook_active) console.log(JSON.stringify({ decision: "block", reason: context }));
+      } else console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: context } }));
+    }
+  }
+  if (input.hook_event_name === "PreToolUse") {
+    // Tool names only; command text can contain credentials.
+    await call(s, "POST", "/activity", { name: s.name, state: "working", detail: input.tool_name ?? "tool" }, false);
+  }
+}
+
+
 async function hook() {
   try {
     const s = session();
@@ -303,6 +321,9 @@ async function hook() {
     let raw = "";
     for await (const chunk of process.stdin) raw += chunk;
     const input = JSON.parse(raw || "{}");
+    if (s.managed) {
+      return await workerHook(s, input);
+    }
     switch (input.hook_event_name) {
       case "UserPromptSubmit": {
         await call(s, "POST", "/activity", { name: s.name, state: "thinking", detail: "" });
@@ -333,6 +354,13 @@ async function sleep(f) {
   const anchor = harnessPid();
   const s = session(anchor);
   if (!s) return;
+  if (s.managed) {
+    for (const kind of ["entry", "pending", "priority"]) {
+      if (f[kind]) await call(s, "POST", "/log", { name: s.name, kind, text: f[kind] });
+    }
+    console.log("Work log saved; the runner owns arrival and departure.");
+    return;
+  }
   await call(s, "POST", "/sleep", { name: s.name, entry: f.entry, pending: f.pending, priority: f.priority });
   fs.rmSync(sessionFile(anchor.pid), { force: true });
   console.log(`${s.name} walked out through reception.`);
@@ -347,6 +375,9 @@ function awake() {
 const reads = (f) => Math.max(0, Number(f.reads ?? 0) || 0);
 const ids = (words) => words.map(Number).filter(Number.isInteger);
 
+export { config, call, STATE, sessionFile, full, shown, printBriefing, slug };
+
+async function main() {
 const [cmd, ...rest] = process.argv.slice(2);
 const f = flags(rest);
 switch (cmd) {
@@ -479,4 +510,9 @@ switch (cmd) {
     break;
   default:
     die("commands: wakeup [identity] · mail · read · done · say · room · coins · give · menu · buy · get · briefing · log · who · sleep (and listen, relay, hook for the plugin itself)");
+}
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  await main().catch(e => die(e.message));
 }
