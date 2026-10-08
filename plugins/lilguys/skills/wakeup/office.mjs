@@ -220,7 +220,7 @@ async function wakeup(f) {
   if (anchor.harness === "claude") {
     for (let i = 0; i < 5 && !listening(anchor.pid); i++) await new Promise((r) => setTimeout(r, 1000));
     if (!listening(anchor.pid)) {
-      console.log(`NO LIVE INBOX: messages reach you only at prompts and turn ends. Start one now with the Monitor tool, persistent, running: node ${import.meta.filename} listen\n`);
+      console.log(`NO LIVE INBOX: messages reach you only at prompts and turn ends. Start one now with the Monitor tool at its longest timeout, and again whenever it expires, running: node ${import.meta.filename} listen\n`);
     }
   }
   const others = present.filter((m) => m.name !== name);
