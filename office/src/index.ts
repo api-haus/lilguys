@@ -76,6 +76,7 @@ export class Office extends DurableObject<Env> {
       `);
       // Databases created before the mailbox.
       try { this.sql.exec("ALTER TABLE messages ADD COLUMN brief TEXT NOT NULL DEFAULT ''"); } catch {}
+      try { this.sql.exec("ALTER TABLE messages ADD COLUMN sender_owner TEXT"); } catch {}
       try { this.sql.exec("ALTER TABLE members DROP COLUMN cursor"); } catch {}
       for (const { owner } of this.sql.exec<{ owner: string }>("SELECT owner FROM members GROUP BY owner ORDER BY MIN(seen)").toArray()) this.icon(owner);
       this.sql.exec(`UPDATE messages SET brief = substr(text, 1, ${BRIEF_CHARS}) WHERE brief = ''`);
@@ -188,14 +189,14 @@ export class Office extends DurableObject<Env> {
 
   // A message is mailed to whoever it is addressed to, or, unaddressed, to everybody whose desk is
   // in the room it was said in, and to every agent it names. Other kitchen talk is mailed to nobody.
-  say(sender: string, text: string, to?: string | null, room?: string | null, brief?: string | null, origin?: string | null) {
+  say(sender: string, text: string, to?: string | null, room?: string | null, brief?: string | null, origin?: string | null, senderOwner?: string | null) {
     const from = this.member(sender);
     const target = to ? this.member(to) : undefined;
     const where = room ?? target?.room ?? from?.room ?? KITCHEN;
     const msg = this.sql
       .exec<Message>(
-        "INSERT INTO messages (at, room, sender, recipient, brief, text) VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
-        Date.now(), where, sender, to ?? null, brief?.trim() || briefOf(text), text,
+        "INSERT INTO messages (at, room, sender, recipient, brief, text, sender_owner) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
+        Date.now(), where, sender, to ?? null, brief?.trim() || briefOf(text), text, senderOwner ?? "",
       )
       .one();
     const heard = to
@@ -214,7 +215,7 @@ export class Office extends DurableObject<Env> {
   mail(name: string, state: Mail["state"], limit = -1): Mail[] {
     return this.sql
       .exec<Mail>(
-        "SELECT m.*, mail.state, mail.touched, mail.reminded, a.owner AS via FROM mail JOIN messages m ON m.id = mail.message LEFT JOIN aliases a ON a.name = m.sender WHERE mail.name = ? AND mail.state = ? ORDER BY m.id LIMIT ?",
+        "SELECT m.*, mail.state, mail.touched, mail.reminded, COALESCE(m.sender_owner, a.owner) AS via FROM mail JOIN messages m ON m.id = mail.message LEFT JOIN aliases a ON a.name = m.sender WHERE mail.name = ? AND mail.state = ? ORDER BY m.id LIMIT ?",
         name, state, limit,
       )
       .toArray();
@@ -250,7 +251,7 @@ export class Office extends DurableObject<Env> {
     if (!hit.length) return null;
     const reactions = this.sql.exec<{ who: string; emoji: string }>("SELECT who, emoji FROM reactions WHERE message = ? ORDER BY at", id).toArray();
     const m = this.sql.exec<Message>("SELECT * FROM messages WHERE id = ?", id).one();
-    return { ...m, reactions, via: this.canonical(m.sender) === m.sender ? null : this.canonical(m.sender) };
+    return { ...m, reactions, via: m.sender_owner ?? (this.canonical(m.sender) === m.sender ? null : this.canonical(m.sender)) };
   }
 
   // The office's two coins. A payment with no payer is minted: by an admin, or by a coin reaction.
@@ -418,7 +419,7 @@ export class Office extends DurableObject<Env> {
     if (f.t !== "say" || typeof f.from !== "string" || typeof f.text !== "string") return;
     const { owner } = ws.deserializeAttachment() as { owner: string | null };
     if (owner) {
-      if (this.owns(owner, f.from)) this.say(f.from, f.text, f.to, f.room);
+      if (this.owns(owner, f.from)) this.say(f.from, f.text, f.to, f.room, null, null, f.from === owner ? owner : null);
       return;
     }
     const answers = await Promise.all(this.bridges().map(async ([name, bridge]) => [name, await bridge.command(f.text.trim())] as const));
@@ -513,7 +514,8 @@ export default {
         const err = missing("from", "text");
         if (err) return err;
         if (b.to === b.from) return json({ error: "a message to yourself is a log entry" }, 400);
-        const msg = await office.say(b.from, b.text, b.to, b.room, b.brief);
+        // Provenance is derived from the authenticated key, never a caller-supplied body field.
+        const msg = await office.say(b.from, b.text, b.to, b.room, b.brief, null, owner && b.from === owner ? owner : null);
         if (Number.isInteger(b.re)) await office.close(b.from, [b.re]);
         return json(msg);
       }

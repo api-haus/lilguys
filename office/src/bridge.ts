@@ -1,4 +1,4 @@
-export type Message = { id: number; at: number; room: string; sender: string; recipient: string | null; brief: string; text: string };
+export type Message = { id: number; at: number; room: string; sender: string; recipient: string | null; brief: string; text: string; sender_owner?: string | null };
 export type Arrival = { name: string; owner: string; harness: string; room: string; icon?: string };
 
 export type Frame =

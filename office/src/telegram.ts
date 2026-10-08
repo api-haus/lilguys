@@ -126,7 +126,10 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     const poster = replied ? this.sql.exec<{ sender: string }>("SELECT sender FROM posted WHERE message = ?", replied).toArray()[0]?.sender : null;
     const office = this.env.OFFICE.getByName(OFFICE_NAME);
     const [to, body] = addressee([text, ...files].filter(Boolean).join("\n"), await office.memberNames(), poster ?? null);
-    const said = await office.say(full || from.username || "someone", body, to, room, null, "telegram");
+    // A display name is not an identity: another person can also call themselves "Denis".
+    // Bind this message to the same authenticated username used by private login.
+    const senderOwner = !msg.sender_chat && from.username ? ownerOf(from.username) : null;
+    const said = await office.say(full || from.username || "someone", body, to, room, null, "telegram", senderOwner);
     this.sql.exec("INSERT OR REPLACE INTO posted (message, sender, office) VALUES (?, ?, ?)", msg.message_id, full || from.username || "someone", said.id);
   }
 
