@@ -143,12 +143,13 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     const added = (r.new_reaction ?? []).filter((x: any) => !before.has(JSON.stringify(x)));
     const office = this.env.OFFICE.getByName(OFFICE_NAME);
     const who = r.actor_chat?.title ?? (full || from.username);
+    const whoOwner = r.actor_chat || !from?.id ? null : await office.ownerOfAccount("telegram", String(from.id), from.username ?? null);
     for (const x of added) {
-      if (x.type === "emoji") await office.react(id, who, x.emoji, null);
+      if (x.type === "emoji") await office.react(id, who, x.emoji, null, whoOwner);
       if (x.type === "custom_emoji") {
         const [st] = await this.api<any[]>("getCustomEmojiStickers", { custom_emoji_ids: [x.custom_emoji_id] }).catch(() => []);
         const picture = st ? this.picture(`custom emoji ${st.emoji ?? ""}`.trim(), st) : null;
-        await office.react(id, who, st?.emoji ? `${st.emoji} (custom)` : "custom emoji", picture);
+        await office.react(id, who, st?.emoji ? `${st.emoji} (custom)` : "custom emoji", picture, whoOwner);
       }
     }
   }

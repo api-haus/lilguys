@@ -373,7 +373,7 @@ export class Office extends DurableObject<Env> {
 
   // A reaction in a messenger, kept on the message, and mailed to the agent it concerns: whoever
   // said it, or else whoever it was addressed to. It is not relayed; the messengers show their own.
-  react(id: number, who: string, emoji: string, picture: string | null) {
+  react(id: number, who: string, emoji: string, picture: string | null, whoOwner: string | null = null) {
     const m = this.sql.exec<Message>("SELECT * FROM messages WHERE id = ?", id).toArray()[0];
     if (!m) return;
     const fresh = this.sql.exec("INSERT OR IGNORE INTO reactions (message, who, emoji, at) VALUES (?, ?, ?, ?) RETURNING message", id, who, emoji, Date.now()).toArray();
@@ -384,8 +384,8 @@ export class Office extends DurableObject<Env> {
     const text = `reacted ${emoji} to #${id} "${m.brief}"${tip && agent === m.sender ? `, tipping you ${show(tip, 1)}` : ""}${picture ? `\n${picture}` : ""}`;
     const note = this.sql
       .exec<Message>(
-        "INSERT INTO messages (at, room, sender, recipient, brief, text) VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
-        Date.now(), m.room, who, agent, briefOf(text), text,
+        "INSERT INTO messages (at, room, sender, recipient, brief, text, sender_owner) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
+        Date.now(), m.room, who, agent, briefOf(text), text, whoOwner ?? "",
       )
       .one();
     this.sql.exec("INSERT INTO mail (name, message) VALUES (?, ?)", agent, note.id);
