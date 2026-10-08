@@ -301,6 +301,11 @@ export default {
         return missing("name", "text") ?? json(await office.note(b.name, b.kind, b.text));
       case "POST /sleep":
         return missing("name") ?? json(await office.sleep(b.name, b.entry, b.pending, b.priority));
+      case "GET /discord":
+        if (!env.DISCORD_TOKEN || !env.DISCORD_GUILD) return json({ error: "no Discord server configured" }, 404);
+        const bridge = env.DISCORD.getByName(env.DISCORD_GUILD);
+        const failed = await bridge.ensure().then(() => null, (e) => String(e));
+        return json({ ...(await bridge.report()), ensure: failed });
       case "GET /state":
         return json(await office.snapshot());
     }

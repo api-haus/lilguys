@@ -30,3 +30,6 @@ To connect a server:
    ```
 
 The Worker connects to Discord within five minutes, or at the next thing said in the office.
+
+`GET /discord` (with the office token) connects if it is not, and reports the gateway's state:
+whether it is connected, the last close code, and the last error handling a Discord message.

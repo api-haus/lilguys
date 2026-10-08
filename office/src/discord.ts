@@ -73,9 +73,14 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
     if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + WATCHDOG_MS);
     if (this.ws) return;
     const resume = this.kv("session") && this.kv("resume_url");
-    const res = await fetch(resume ? `${this.kv("resume_url")}/?v=10&encoding=json` : GATEWAY, { headers: { upgrade: "websocket" } });
+    // Workers open a WebSocket through fetch, which takes https:// where Discord hands out wss://.
+    const url = resume ? `${this.kv("resume_url")!.replace(/^wss:/, "https:")}/?v=10&encoding=json` : GATEWAY;
+    const res = await fetch(url, { headers: { upgrade: "websocket" } });
     const ws = res.webSocket;
-    if (!ws) throw new Error(`gateway refused the upgrade: ${res.status}`);
+    if (!ws) {
+      for (const k of ["session", "resume_url", "seq"]) this.setKv(k, null);
+      throw new Error(`gateway refused the upgrade: ${res.status}`);
+    }
     ws.accept();
     this.ws = ws;
     ws.addEventListener("message", (e) => this.onGateway(ws, JSON.parse(e.data as string), !!resume));
@@ -93,6 +98,7 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
     if (this.beat) clearInterval(this.beat);
     this.ws = this.beat = null;
     // 4004 bad token, 4013/4014 bad or unapproved intents: reconnecting cannot help.
+    this.setKv("closed", `${code} at ${new Date().toISOString()}`);
     if ([4004, 4013, 4014].includes(code)) console.error(`discord gateway closed for good: ${code}`);
     else this.ctx.waitUntil(this.ensure());
   }
@@ -120,11 +126,19 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
           this.setKv("resume_url", p.d.resume_gateway_url);
           this.setKv("me", p.d.user.id);
         } else if (p.t === "MESSAGE_CREATE" && p.d.guild_id === this.guild) {
-          await this.heard(p.d);
+          await this.heard(p.d).catch((e) => this.setKv("error", `${new Date().toISOString()} ${e}`));
         } else if (p.t?.startsWith("CHANNEL_")) {
           this.channels = null;
         }
     }
+  }
+
+  async report() {
+    return {
+      connected: !!this.ws,
+      alarm: await this.ctx.storage.getAlarm(),
+      ...Object.fromEntries(["session", "seq", "closed", "error", "me"].map((k) => [k, this.kv(k)])),
+    };
   }
 
   async heard(d: any) {
