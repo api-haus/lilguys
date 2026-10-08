@@ -9,6 +9,7 @@ export { Discord, Telegram };
 interface Env extends DiscordEnv, TelegramEnv {
   TOKEN: string;
   OFFICE_URL: string;
+  MIRROR_PEOPLE: boolean;
 }
 
 type Member = {
@@ -142,7 +143,9 @@ export class Office extends DurableObject<Env> {
     return all;
   }
 
+  // What a person types in one messenger is mirrored into the others only when MIRROR_PEOPLE is on.
   relay(frame: Frame, origin?: string | null) {
+    if (origin && !this.env.MIRROR_PEOPLE) return;
     for (const [name, bridge] of this.bridges()) {
       if (name !== origin) this.ctx.waitUntil(bridge.relay(frame).catch((e) => console.error(`${name} relay: ${e}`)));
     }

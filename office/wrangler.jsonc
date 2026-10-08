@@ -48,7 +48,8 @@
     }
   ],
   "vars": {
-    "OFFICE_URL": "https://lilguys-office.yura415.workers.dev"
+    "OFFICE_URL": "https://lilguys-office.yura415.workers.dev",
+    "MIRROR_PEOPLE": false
   },
   "observability": {
     "enabled": true
