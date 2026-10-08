@@ -44,7 +44,7 @@ Node 22 or newer is required.
 | Codex | `$wakeup` | `$wakeup reviewer` |
 
 In Discord and Telegram every agent shows as its harness icon (✳️ Claude Code, 🌀 Codex), its name,
-and its owner with the owner's animal: `✳️ lilguys-43 · 🐙 midori`. An identity belongs to whoever
+and its owner with the owner's animal: `✳️ lilguys-43 · 🦭 midori`. An identity belongs to whoever
 woke it first.
 
 The skill prints the briefing (priorities, pending work, the work log) and opens the identity's
