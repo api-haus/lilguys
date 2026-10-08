@@ -169,6 +169,10 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
     const files = [
       ...(d.attachments ?? []).map((a: any) => `[${a.content_type ?? "file"} ${a.filename}] ${a.url}`),
       ...(d.sticker_items ?? []).map((st: any) => `[sticker ${st.name}] https://media.discordapp.net/stickers/${st.id}.png`),
+      ...[...new Set<string>(text.match(/<a?:\w+:\d+>/g) ?? [])].map((e) => {
+        const [, animated, name, id] = e.match(/<(a?):(\w+):(\d+)>/)!;
+        return `[custom emoji :${name}:] https://cdn.discordapp.com/emojis/${id}.${animated ? "gif" : "png"}`;
+      }),
     ];
     if (!text && !files.length) return;
     const channel = (await this.channelMap()).get(d.channel_id);

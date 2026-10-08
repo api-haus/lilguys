@@ -97,7 +97,7 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     const created = msg.forum_topic_created?.name ?? msg.forum_topic_edited?.name;
     if (created && thread) return this.learn(created, thread);
     const text = (msg.text ?? msg.caption ?? "").trim();
-    const files = this.attachments(msg);
+    const files = [...this.attachments(msg), ...(await this.customEmoji(msg))];
     if (!text && !files.length) return;
 
     const admin = String(msg.sender_chat?.id) === this.chat || (await this.isAdmin(msg.from?.id));
@@ -123,9 +123,19 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     if (msg.photo?.length) out.push(`[photo] ${url(msg.photo.at(-1).file_id)}`);
     for (const kind of ["animation", "video", "video_note", "sticker", "document", "audio", "voice"]) {
       const f = msg[kind];
-      if (f && !(kind === "document" && msg.animation)) out.push(`[${kind}${f.file_name ? ` ${f.file_name}` : ""}] ${url(f.file_id)}${preview(f)}`);
+      const named = f?.file_name ?? [f?.emoji, f?.set_name].filter(Boolean).join(" ");
+      if (f && !(kind === "document" && msg.animation)) out.push(`[${kind}${named ? ` ${named}` : ""}] ${url(f.file_id)}${preview(f)}`);
     }
     return out;
+  }
+
+  // Custom emoji are stickers underneath; each distinct one in the text becomes a line like any file.
+  async customEmoji(msg: any) {
+    const ids = [...new Set<string>((msg.entities ?? msg.caption_entities ?? []).filter((e: any) => e.type === "custom_emoji").map((e: any) => e.custom_emoji_id))];
+    if (!ids.length) return [];
+    const stickers = await this.api<any[]>("getCustomEmojiStickers", { custom_emoji_ids: ids }).catch(() => []);
+    const url = (id: string) => `${this.env.OFFICE_URL}/files/telegram/${encodeURIComponent(id)}`;
+    return stickers.map((st) => `[custom emoji ${st.emoji ?? ""}] ${url(st.file_id)}${st.thumbnail ? ` (still: ${url(st.thumbnail.file_id)})` : ""}`);
   }
 
   // Streams a file the bot can see, so its token never leaves the Worker.
