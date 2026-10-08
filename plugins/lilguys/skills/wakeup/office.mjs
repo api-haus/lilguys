@@ -421,7 +421,7 @@ switch (cmd) {
   case "room": {
     const s = awake();
     const room = f.close ?? f._[0];
-    if (!room) die("usage: room <room> (lock in there) · room --close <room> (delete a room you opened)");
+    if (!room && f.out === undefined) die("usage: room <room> (lock in there) · room --out (back to your own room) · room --close <room> (delete a room you opened)");
     if (f.close !== undefined) {
       const out = await call(s, "POST", "/room/close", { name: s.name, room });
       console.log(`#${out.closed} is closed${out.moved.length ? `; ${out.moved.join(", ")} went back to their own rooms` : ""}.`);
@@ -430,7 +430,11 @@ switch (cmd) {
     }
     const { me, opened } = await call(s, "POST", "/room", { name: s.name, room });
     fs.writeFileSync(sessionFile(s.anchor), JSON.stringify({ ...s, room: me.room }), { mode: 0o600 });
-    console.log(`Locked in to #${me.room}${opened ? ", a new room you opened" : ""}. Your mailbox now takes only talk here and what is addressed to you.`);
+    console.log(
+      f.out !== undefined
+        ? `Back in #${me.room}, your own room.`
+        : `Locked in to #${me.room}${opened ? ", a new room you opened" : ""}. Your mailbox now takes only talk here and what names or is addressed to you.`,
+    );
     break;
   }
   case "who": {

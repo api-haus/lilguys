@@ -170,8 +170,14 @@ export class Office extends DurableObject<Env> {
     return this.sql.exec<{ name: string }>("SELECT name FROM members").toArray().map((r) => r.name);
   }
 
+  // An agent named anywhere in a message hears it, whatever room it was said in.
+  mentioned(text: string, sender: string) {
+    const escape = (n: string) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return this.memberNames().filter((n) => n !== sender && new RegExp(`(^|[^\\w])@?${escape(n)}(?![\\w])`, "i").test(text));
+  }
+
   // A message is mailed to whoever it is addressed to, or, unaddressed, to everybody whose desk is
-  // in the room it was said in. Kitchen talk is ambient and mailed to nobody.
+  // in the room it was said in, and to every agent it names. Other kitchen talk is mailed to nobody.
   say(sender: string, text: string, to?: string | null, room?: string | null, brief?: string | null, origin?: string | null) {
     const from = this.member(sender);
     const target = to ? this.member(to) : undefined;
@@ -182,11 +188,12 @@ export class Office extends DurableObject<Env> {
         Date.now(), where, sender, to ?? null, brief?.trim() || briefOf(text), text,
       )
       .one();
-    const recipients = to
+    const heard = to
       ? [to]
       : where === KITCHEN
         ? []
         : this.sql.exec<{ name: string }>("SELECT name FROM members WHERE room = ? AND name != ?", where, sender).toArray().map((r) => r.name);
+    const recipients = [...new Set([...heard, ...this.mentioned(text, sender)])];
     for (const name of recipients) this.sql.exec("INSERT INTO mail (name, message) VALUES (?, ?)", name, msg.id);
     this.broadcast({ t: "message", message: msg });
     this.relay({ t: "message", message: msg, from: from ?? null }, origin);
@@ -282,9 +289,10 @@ export class Office extends DurableObject<Env> {
     this.relay({ t: "leave", name });
   }
 
-  // Locking in: the desk moves to a room, where only its talk and what is addressed to the agent
-  // reach the mailbox. A room nobody has used yet is opened by whoever locks into it first.
-  move(name: string, room: string) {
+  // Locking in: the desk moves to a room, where only its talk and what names or is addressed to the
+  // agent reach the mailbox; with no room it goes back to its owner's. A room nobody has used yet is opened by whoever locks into it first.
+  move(name: string, to?: string | null) {
+    const room = to || this.member(name)!.owner;
     const fresh = !this.sql.exec("SELECT 1 FROM members WHERE room = ? UNION SELECT 1 FROM messages WHERE room = ?", room, room).toArray().length;
     if (fresh) this.sql.exec("INSERT OR IGNORE INTO rooms (name, opener, at) VALUES (?, ?, ?)", room, name, Date.now());
     this.sql.exec("UPDATE members SET room = ?, seen = ? WHERE name = ?", room, Date.now(), name);
@@ -431,7 +439,7 @@ export default {
         if (!["entry", "pending", "priority"].includes(b.kind)) return json({ error: "kind is entry, pending or priority" }, 400);
         return missing("name", "text") ?? json(await office.note(b.name, b.kind, b.text));
       case "POST /room":
-        return missing("name", "room") ?? json(await office.move(b.name, b.room));
+        return missing("name") ?? json(await office.move(b.name, b.room));
       case "POST /room/close": {
         const err = missing("name", "room");
         if (err) return err;

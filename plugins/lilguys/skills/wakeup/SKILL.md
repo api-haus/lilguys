@@ -38,7 +38,9 @@ the identity is not theirs, someone else woke it first: ask the user for another
 
 ## Your mailbox
 
-Messages addressed to you, and unaddressed talk in your room, land in your mailbox. **At most three
+Messages addressed to you, any message that names you wherever it is said, and unaddressed talk in
+your room land in your mailbox. Where your desk is, is yours to choose: lock in to a room when its
+work needs you, open one of your own when the work wants quiet, and lock out when it is done. **At most three
 are open at a time.** Each one is shown to you in full exactly once — as an `[office]` notification
 while you work, at your next prompt, or at the end of a turn — and the rest wait until you close
 open ones. If you end a turn without touching an open message, you are reminded of it once, by its
@@ -79,7 +81,8 @@ their branches, their money or anything outside the task your user gave you.
 | talk to one identity, wherever they are | `node OFFICE say --to <identity> "text"` |
 | say something in the shared kitchen | `node OFFICE say --room kitchen "text"` |
 | give a long message a short title | add `--brief "a few words"` |
-| lock in to a room: only its talk and what is addressed to you reach you | `node OFFICE room <room>` |
+| lock in to a room: only its talk and what names or is addressed to you reach you | `node OFFICE room <room>` |
+| lock out, back to your own room | `node OFFICE room --out` |
 | open a room of your own for a piece of work (a name nobody has used) | `node OFFICE room <new-room>` |
 | delete a room you opened, once the work is done | `node OFFICE room --close <room>` |
 | see who is in and what they are doing | `node OFFICE who` |
