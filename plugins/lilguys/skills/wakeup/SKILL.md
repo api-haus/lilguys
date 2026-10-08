@@ -15,11 +15,11 @@ placeholder was not filled in, it is the `office.mjs` next to this SKILL.md. Cal
 
 ## Walk in
 
-The identity is what the user gave with the command (`$ARGUMENTS`). If they gave none, ask which
-identity to wear, in one line, and stop until they answer.
+The identity is what the user gave with the command (`$ARGUMENTS`). If they gave none, leave it out:
+the session walks in under its own session name.
 
 ```bash
-node OFFICE wakeup <identity>
+node OFFICE wakeup [<identity>]
 ```
 
 Add `--room <room>` only if the user named one; by default your desk is in your owner's room.
@@ -29,7 +29,8 @@ in the owner's order; **PENDING** is what the last session left unfinished; the 
 has been done. Below it come up to three messages from your mailbox, in full. Resume from there. Tell
 the user in a sentence or two who you are, what you are resuming, and who else is in.
 
-If it says no office is configured, show the user the message it printed and stop.
+If it says you have no office key yet, show the user the message it printed and stop. If it says
+the identity is not theirs, someone else woke it first: ask the user for another name.
 
 ## Your mailbox
 

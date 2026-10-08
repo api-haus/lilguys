@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { type Bridge, type Frame, type Message, OFFICE_NAME } from "./bridge";
+import { type Arrival, type Bridge, type Frame, type Message, label, OFFICE_NAME } from "./bridge";
 import { ALLOW_TABLE, addressee, allowed, command, isAllowed, isLogin, ownerOf, welcome } from "./heard";
 import type { Office } from "./index";
 
@@ -200,15 +200,15 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
 
   // A direct message: `!login` hands a person who is heard on the server their own office key.
   async private(d: any) {
-    if (!isLogin(d.content ?? "")) return;
     const reply = (content: string) => this.rest("POST", `/channels/${d.channel_id}/messages`, { content, allowed_mentions: { parse: [] } });
+    if (!isLogin(d.content ?? "")) return reply("I'm the lilguys office. Send me `login` to get your key; talk to the agents in the server's channels.");
     const member = await this.rest<{ nick?: string; roles: string[] }>("GET", `/guilds/${this.guild}/members/${d.author.id}`).catch(() => null);
     const heard = member && ((await this.isAdmin(d.author.id, member.roles)) || isAllowed(this.sql, [d.author.username, d.author.global_name, member.nick, `<@${d.author.id}>`]));
-    if (!heard) return reply("Ask an admin of the office's server to `!allow` you first.");
+    if (!heard) return reply("Hi! I'm the lilguys office. I don't know you yet: ask an admin of the server to say `!allow <your name>` there, then message me `login` again.");
     const owner = ownerOf(d.author.username);
     const token = await this.env.OFFICE.getByName(OFFICE_NAME).issue(owner);
-    const [hello, where, config, ...rest] = welcome(this.env.OFFICE_URL, owner, token);
-    await reply([hello, where, "```json\n" + config + "\n```", ...rest].join("\n"));
+    const { hello, steps } = welcome(this.env.OFFICE_URL, owner, token);
+    await reply([hello, steps[0], "```sh\n" + steps[1] + "\n```", steps[2], "```sh\n" + steps[3] + "\n```", steps[4]].join("\n"));
   }
 
   command(text: string) {
@@ -220,23 +220,23 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
   async relay(frame: Frame) {
     if (!this.env.DISCORD_TOKEN || !this.env.DISCORD_GUILD) return;
     await this.ensure();
-    if (frame.t === "message") return this.post(frame.message);
+    if (frame.t === "message") return this.post(frame.message, frame.from);
     const line =
       frame.t === "enter"
-        ? `🚪 **${frame.member.name}** walked in through reception — ${frame.member.owner}'s ${frame.member.harness}, desk in #${frame.member.room}`
+        ? `🚪 **${label(frame.member.name, frame.member)}** walked in through reception, desk in #${frame.member.room}`
         : `👋 **${frame.name}** walked out`;
     const channel = await this.channel(RECEPTION);
     await this.rest("POST", `/channels/${channel.id}/messages`, { content: line, allowed_mentions: { parse: [] } });
   }
 
-  async post(m: Message) {
+  async post(m: Message, from: Arrival | null) {
     const channel = await this.channel(m.room);
     const hook = await this.webhook(channel.id);
     const text = m.recipient ? `→ **${m.recipient}**: ${m.text}` : m.text;
     for (let i = 0; i < text.length; i += DISCORD_LIMIT) {
       const sent = await this.rest<{ id: string }>("POST", `/webhooks/${hook.id}/${hook.token}?wait=true`, {
         content: text.slice(i, i + DISCORD_LIMIT),
-        username: m.sender.slice(0, 80),
+        username: label(m.sender, from).slice(0, 80),
         allowed_mentions: { parse: [] },
       });
       this.sql.exec("INSERT OR REPLACE INTO posted (discord, sender) VALUES (?, ?)", sent.id, m.sender);

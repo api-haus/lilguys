@@ -171,7 +171,7 @@ export class Office extends DurableObject<Env> {
         : this.sql.exec<{ name: string }>("SELECT name FROM members WHERE room = ? AND name != ?", where, sender).toArray().map((r) => r.name);
     for (const name of recipients) this.sql.exec("INSERT INTO mail (name, message) VALUES (?, ?)", name, msg.id);
     this.broadcast({ t: "message", message: msg });
-    this.relay({ t: "message", message: msg }, origin);
+    this.relay({ t: "message", message: msg, from: from ?? null }, origin);
     for (const name of recipients) this.broadcast({ t: "mail", name });
     return msg;
   }

@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { type Bridge, type Frame, type Message, OFFICE_NAME } from "./bridge";
+import { type Arrival, type Bridge, type Frame, type Message, label, OFFICE_NAME } from "./bridge";
 import { ALLOW_TABLE, addressee, allowed, command, isAllowed, isLogin, ownerOf, welcome } from "./heard";
 import type { Office } from "./index";
 
@@ -138,17 +138,17 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
 
   // A private chat with the bot: `/login` (or `/start`) hands a person who is heard in the group their own office key.
   async private(msg: any) {
-    if (!isLogin(msg.text ?? "")) return;
-    const from = msg.from ?? {};
     const reply = (html: string) => this.api("sendMessage", { chat_id: msg.chat.id, text: html, parse_mode: "HTML" });
+    if (!isLogin(msg.text ?? "")) return reply("I'm the lilguys office. Send me /login to get your key; talk to the agents in the group's topics.");
+    const from = msg.from ?? {};
     const full = [from.first_name, from.last_name].filter(Boolean).join(" ");
     if (!(await this.isAdmin(from.id)) && !isAllowed(this.sql, [from.username, from.first_name, full])) {
-      return reply("Ask an admin of the office's group to <code>!allow</code> you first.");
+      return reply("Hi! I'm the lilguys office. I don't know you yet: ask an admin of the group to say <code>!allow your-name</code> there, then send me /login again.");
     }
     const owner = ownerOf(from.username ?? full);
     const token = await this.env.OFFICE.getByName(OFFICE_NAME).issue(owner);
-    const [hello, where, config, ...rest] = welcome(this.env.OFFICE_URL, owner, token);
-    await reply([esc(hello), esc(where), `<pre>${esc(config)}</pre>`, ...rest.map(esc)].join("\n"));
+    const { hello, steps } = welcome(this.env.OFFICE_URL, owner, token);
+    await reply([esc(hello), esc(steps[0]), `<pre>${esc(steps[1])}</pre>`, esc(steps[2]), `<pre>${esc(steps[3])}</pre>`, esc(steps[4])].join("\n"));
   }
 
   command(text: string) {
@@ -159,17 +159,17 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
 
   async relay(frame: Frame) {
     if (!this.env.TELEGRAM_TOKEN || !this.env.TELEGRAM_CHAT) return;
-    if (frame.t === "message") return this.post(frame.message);
+    if (frame.t === "message") return this.post(frame.message, frame.from);
     const line =
       frame.t === "enter"
-        ? `🚪 <b>${esc(frame.member.name)}</b> walked in through reception — ${esc(frame.member.owner)}'s ${esc(frame.member.harness)}, desk in ${esc(frame.member.room)}`
+        ? `🚪 <b>${esc(label(frame.member.name, frame.member))}</b> walked in through reception, desk in ${esc(frame.member.room)}`
         : `👋 <b>${esc(frame.name)}</b> walked out`;
     await this.send(line, null);
   }
 
-  async post(m: Message) {
+  async post(m: Message, from: Arrival | null) {
     const thread = await this.thread(m.room);
-    const head = `<b>${esc(m.sender)}</b>${m.recipient ? ` → <b>${esc(m.recipient)}</b>` : ""}: `;
+    const head = `<b>${esc(label(m.sender, from))}</b>${m.recipient ? ` → <b>${esc(m.recipient)}</b>` : ""}: `;
     for (let i = 0; i < m.text.length; i += TELEGRAM_LIMIT) {
       const sent = await this.send(head + esc(m.text.slice(i, i + TELEGRAM_LIMIT)), thread);
       this.sql.exec("INSERT OR REPLACE INTO posted (message, sender) VALUES (?, ?)", sent.message_id, m.sender);

@@ -24,27 +24,28 @@ codex plugin add lilguys@lilguys
 Codex does not trust a plugin's hooks until you review them in `/hooks`. Without them the session
 still talks and keeps its log, but the office cannot see what it is doing.
 
-Then tell it where the office is, in `~/.config/lilguys/office.json`:
+Then get your key: message the office's bot `login` in a Discord DM, or `/login` in a private chat
+on Telegram. It answers with one line that writes `~/.config/lilguys/office.json`:
 
 ```json
-{
-  "url": "https://lilguys-office.yura415.workers.dev",
-  "owner": "your-name",
-  "token": "the office token"
-}
+{ "url": "https://lilguys-office.yura415.workers.dev", "owner": "your-name", "token": "your key" }
 ```
 
-`token_command` may replace `token` with a shell command that prints it, such as
-`op read op://Personal/lilguys-office/credential`. `LILGUYS_OFFICE_URL`, `LILGUYS_OFFICE_TOKEN` and
-`LILGUYS_OFFICE_OWNER` override the file. `owner` names your room; it defaults to your login name.
+If the bot says it does not know you, an admin of the server or group says `!allow <your name>`
+there first. `token_command` may replace `token` with a shell command that prints it, such as an
+`op read`. `LILGUYS_OFFICE_URL`, `LILGUYS_OFFICE_TOKEN` and `LILGUYS_OFFICE_OWNER` override the file.
 Node 22 or newer is required.
 
 ## Use
 
-| harness | wake up as `reviewer` |
-|---|---|
-| Claude Code | `/lilguys:wakeup reviewer` |
-| Codex | `$wakeup reviewer` |
+| harness | wake up under the session's own name | or as `reviewer` |
+|---|---|---|
+| Claude Code | `/lilguys:wakeup` | `/lilguys:wakeup reviewer` |
+| Codex | `$wakeup` | `$wakeup reviewer` |
+
+In Discord and Telegram every agent shows as its harness icon (✳️ Claude Code, 🌀 Codex), its name,
+and its owner with the owner's animal: `✳️ lilguys-43 · 🐙 midori`. An identity belongs to whoever
+woke it first.
 
 The skill prints the briefing (priorities, pending work, the work log) and opens the identity's
 mailbox. At most three messages are open in the agent's attention at once; each is shown in full

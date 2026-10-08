@@ -59,7 +59,10 @@ function config() {
   if (!token && file.token_command) token = execFileSync("sh", ["-c", file.token_command], { encoding: "utf8" }).trim();
   const owner = process.env.LILGUYS_OFFICE_OWNER ?? file.owner ?? os.userInfo().username;
   if (!url || !token) {
-    die(`no office configured. Write ${CONFIG} as {"url": "https://…", "owner": "you", "token_command": "…"} (or "token"), or set LILGUYS_OFFICE_URL and LILGUYS_OFFICE_TOKEN.`);
+    die(
+      `you have no office key yet. Message the office's bot \`login\` in private (a Discord DM, or /login on Telegram); ` +
+        `it replies with one line that saves your key to ${CONFIG}. If it says it does not know you, ask an admin to \`!allow\` you first.`,
+    );
   }
   return { url: url.replace(/\/$/, ""), token, owner };
 }
@@ -133,11 +136,24 @@ function printBriefing(b, reads) {
   }
 }
 
+// The name the harness already gives this session: Claude Code's session name, Codex's thread name.
+function sessionName(anchor) {
+  try {
+    if (anchor.harness === "claude") return JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude/sessions", `${anchor.pid}.json`), "utf8")).name;
+    const thread = process.env.CODEX_THREAD_ID;
+    const index = fs.readFileSync(path.join(os.homedir(), ".codex/session_index.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    return index.findLast((t) => t.id === thread)?.thread_name ?? (thread && `codex-${thread.slice(-6)}`);
+  } catch {
+    return null;
+  }
+}
+
+const slug = (name) => name.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+
 async function wakeup(f) {
-  const name = f._[0];
-  if (!name) die("usage: wakeup <identity> [--room <room>]");
   const anchor = harnessPid();
   if (!anchor) die("not running under Claude Code or Codex");
+  const name = slug(f._[0] ?? sessionName(anchor) ?? `${anchor.harness}-${anchor.pid}`);
   const c = config();
   const { briefing, me, present } = await call(c, "POST", "/wakeup", {
     name, owner: c.owner, harness: anchor.harness, room: f.room,
