@@ -29,6 +29,7 @@
   .tray { margin-top:12px; height:64px; border-radius:10px; background:var(--steel-dark); display:flex; align-items:center; justify-content:center; font-size:38px; overflow:hidden; }
   .drop { animation: drop .6s ease-in; }
   @keyframes drop { from { transform: translateY(-60px); opacity:0; } to { transform:none; opacity:1; } }
+  .coin { width:1.3em; height:1.3em; vertical-align:-.3em; object-fit:contain; }
   .steam { animation: steam 1.4s ease-in-out infinite; }
   @keyframes steam { 50% { transform: translateY(-4px) rotate(-3deg); } }
 </style>
@@ -54,6 +55,7 @@ const api = (route, body) => fetch(route, {
   body: body && JSON.stringify(body),
 }).then((r) => r.json());
 const COIN = { murkoin: "🪙", hrukoin: "🐽" };
+const coin = (c) => COIN[c];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 $("who").value = store.get("who") || "";
@@ -63,7 +65,7 @@ async function balance() {
   const who = $("who").value.trim();
   if (!who || !token) { $("balance").textContent = token ? "who's buying?" : "open with #token=… once"; return; }
   const w = await api(`/coins?name=${encodeURIComponent(who)}`);
-  $("balance").innerHTML = w.error ? w.error : `<b>${w.balance.murkoin}</b> 🪙 · <b>${w.balance.hrukoin}</b> 🐽`;
+  $("balance").innerHTML = w.error ? w.error : `<b>${w.balance.murkoin}</b> ${coin("murkoin")} · <b>${w.balance.hrukoin}</b> ${coin("hrukoin")}`;
 }
 
 function render(machines) {
@@ -75,7 +77,7 @@ function render(machines) {
     for (const it of m.items) {
       const b = document.createElement("button");
       b.className = "item";
-      b.innerHTML = `<span class="icon">${it.icon}</span>${it.name}<small>${it.price} ${COIN[it.coin]}</small>`;
+      b.innerHTML = `<span class="icon">${it.icon}</span>${it.name}<small>${it.price} ${coin(it.coin)}</small>`;
       b.onclick = async () => {
         const who = $("who").value.trim();
         if (!who) { $("who").focus(); return; }
@@ -97,8 +99,15 @@ function render(machines) {
   }
 }
 
-if (token) api("/menu").then(render);
-balance();
+// The coins are drawn with the Telegram group's own custom emoji once the office has learned them.
+async function start() {
+  if (!token) return balance();
+  const art = await api("/coins/art").catch(() => ({}));
+  for (const [c, url] of Object.entries(art)) if (url) COIN[c] = `<img class="coin" src="${url}?token=${encodeURIComponent(token)}" alt="${COIN[c]}">`;
+  render(await api("/menu"));
+  balance();
+}
+start();
 </script>
 </body>
 </html>

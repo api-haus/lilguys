@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { type Arrival, type Bridge, type Frame, type Message, label, OFFICE_NAME } from "./bridge";
-import { coinCommand } from "./coins";
+import { COINS, coinCommand } from "./coins";
 import { ALLOW_TABLE, addressee, allowed, command, isAllowed, isLogin, ownerOf, welcome } from "./heard";
 import type { Office } from "./index";
 
@@ -42,6 +42,7 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
         CREATE TABLE IF NOT EXISTS topics (room TEXT PRIMARY KEY, thread INTEGER NOT NULL UNIQUE);
         CREATE TABLE IF NOT EXISTS posted (message INTEGER PRIMARY KEY, sender TEXT NOT NULL, office INTEGER);
         CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+        CREATE TABLE IF NOT EXISTS emoji (plain TEXT PRIMARY KEY, id TEXT NOT NULL, still TEXT);
         ${ALLOW_TABLE};
       `);
       try { this.sql.exec("ALTER TABLE posted ADD COLUMN office INTEGER"); } catch {}
@@ -109,6 +110,7 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     if (!text && !files.length) return;
 
     const admin = String(msg.sender_chat?.id) === this.chat || (await this.isAdmin(msg.from?.id));
+    if (admin && /^[!/]emoji(?:@\w+)?(?:\s|$)/i.test(text)) return void (await this.send(await this.teach(msg), thread));
     const answer = admin ? command(this.sql, text) : null;
     if (answer !== null) return this.send(esc(answer), thread);
     const from = msg.from ?? {};
@@ -168,6 +170,42 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     return out;
   }
 
+  // The group's own custom emoji stand in for plain ones in what the bot posts: `!emoji` followed by
+  // custom emoji teaches it which, and the coins' are learned the first time anyone uses them.
+  learn_emoji(st: any) {
+    this.sql.exec(
+      "INSERT OR REPLACE INTO emoji (plain, id, still) VALUES (?, ?, ?)",
+      st.emoji, st.custom_emoji_id, st.thumbnail?.file_id ?? (st.is_animated || st.is_video ? null : st.file_id),
+    );
+  }
+
+  emojiFor(plain: string) {
+    return this.sql.exec<{ id: string; still: string | null }>("SELECT id, still FROM emoji WHERE plain = ?", plain).toArray()[0] ?? null;
+  }
+
+  async teach(msg: any) {
+    const ids = (msg.entities ?? []).filter((e: any) => e.type === "custom_emoji").map((e: any) => e.custom_emoji_id);
+    if (!ids.length) return "send !emoji followed by the custom emoji to use, e.g. your 🪙 and 🐽";
+    const stickers = await this.api<any[]>("getCustomEmojiStickers", { custom_emoji_ids: ids });
+    for (const st of stickers) if (st.emoji) this.learn_emoji(st);
+    return `the office now posts these as the group's own: ${stickers.map((st) => st.emoji).join(" ")}`;
+  }
+
+  // Where the web pages find each coin's picture.
+  coinArt() {
+    return Object.fromEntries(
+      Object.entries(COINS).map(([coin, c]) => {
+        const e = this.emojiFor(c.icon);
+        return [coin, e?.still ? this.fileUrl(e.still) : null];
+      }),
+    );
+  }
+
+  dress(html: string) {
+    const known = this.sql.exec<{ plain: string; id: string }>("SELECT plain, id FROM emoji").toArray();
+    return known.reduce((h, e) => h.split(e.plain).join(`<tg-emoji emoji-id="${e.id}">${e.plain}</tg-emoji>`), html);
+  }
+
   fileUrl(id: string) {
     return `${this.env.OFFICE_URL}/files/telegram/${encodeURIComponent(id)}`;
   }
@@ -184,6 +222,8 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     const ids = [...new Set<string>(entities.filter((e: any) => e.type === "custom_emoji").map((e: any) => e.custom_emoji_id))];
     if (!ids.length) return [];
     const stickers = await this.api<any[]>("getCustomEmojiStickers", { custom_emoji_ids: ids }).catch(() => []);
+    const coins = Object.values(COINS).map((c) => c.icon as string);
+    for (const st of stickers) if (coins.includes(st.emoji) && !this.emojiFor(st.emoji)) this.learn_emoji(st);
     return stickers.map((st) => this.picture(`custom emoji ${st.emoji ?? ""}`.trim(), st));
   }
 
@@ -261,14 +301,18 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     }
   }
 
+  // Custom emoji need the bot owner's Premium; without it the same text goes out with plain emoji.
   send(html: string, thread: number | null) {
-    return this.api<{ message_id: number }>("sendMessage", {
-      chat_id: this.chat,
-      ...(thread ? { message_thread_id: thread } : {}),
-      text: html,
-      parse_mode: "HTML",
-      link_preview_options: { is_disabled: true },
-    });
+    const post = (text: string) =>
+      this.api<{ message_id: number }>("sendMessage", {
+        chat_id: this.chat,
+        ...(thread ? { message_thread_id: thread } : {}),
+        text,
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+      });
+    const dressed = this.dress(html);
+    return dressed === html ? post(html) : post(dressed).catch(() => post(html));
   }
 
   // Deletes a room's topic, and only one the office knows; General is never a room's.

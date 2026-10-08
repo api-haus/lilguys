@@ -505,6 +505,8 @@ export default {
       }
       case "GET /menu":
         return json(MACHINES);
+      case "GET /coins/art":
+        return json(env.TELEGRAM_TOKEN && env.TELEGRAM_CHAT ? await env.TELEGRAM.getByName(env.TELEGRAM_CHAT).coinArt() : {});
       case "POST /buy": {
         const err = missing("name", "item");
         if (err) return err;
