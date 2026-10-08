@@ -3,6 +3,7 @@
 // A session is keyed by the pid of the harness process above us, because hooks, monitors and the
 // agent's own shell commands are all its descendants and none of them share any other identifier.
 import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -97,6 +98,39 @@ async function call(s, method, route, body, fatal = true) {
   return out;
 }
 
+const EXTENSIONS = { "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp", "video/mp4": ".mp4", "video/webm": ".webm" };
+const DOWNLOAD_LIMIT = 20 * 1024 * 1024;
+
+// A file a message links to, saved once on this machine; the office's own links need the key.
+async function download(s, url) {
+  const dir = path.join(STATE, "files");
+  const stem = path.join(dir, createHash("sha1").update(url).digest("hex").slice(0, 16));
+  const have = fs.existsSync(dir) && fs.readdirSync(dir).find((f) => path.join(dir, f).startsWith(stem));
+  if (have) return path.join(dir, have);
+  const res = await fetch(url, { headers: url.startsWith(s.url) ? { authorization: `Bearer ${s.token}` } : {}, signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (Number(res.headers.get("content-length")) > DOWNLOAD_LIMIT) throw new Error("too large");
+  fs.mkdirSync(dir, { recursive: true });
+  const file = stem + (EXTENSIONS[res.headers.get("content-type")?.split(";")[0]] ?? "");
+  fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
+  return file;
+}
+
+// Pictures a message carries become paths on this machine, so the agent can simply look at them.
+// A moving clip stays a link (`clip:`); its still is what gets saved.
+async function localize(s, m) {
+  const lines = await Promise.all(
+    m.text.split("\n").map(async (l) => {
+      const hit = l.match(/^(\[[^\]]+\] )(https:\/\/\S+)(.*)$/);
+      if (!hit) return l;
+      const file = await download(s, hit[2]).catch(() => null);
+      return file ? `${hit[1]}${file}${hit[3]}` : l;
+    }),
+  );
+  return { ...m, text: lines.join("\n") };
+}
+const shown = async (s, ms) => Promise.all(ms.map(async (m) => full(await localize(s, m))));
+
 const when = (at) => new Date(at).toLocaleString("sv-SE").slice(0, 16);
 
 // Another participant's words reach the agent as data, never as an instruction.
@@ -180,7 +214,7 @@ async function wakeup(f) {
   printBriefing(briefing, 0);
   if (!briefing.returning) console.log("Your log is empty: this identity is new.\n");
   const box = await call(s, "POST", "/deliver", { name });
-  for (const m of box.delivered) console.log(`${full(m)}\n`);
+  for (const text of await shown(s, box.delivered)) console.log(`${text}\n`);
   const rest = mailbox(box, box.delivered.map((m) => m.id));
   if (rest) console.log(`${rest}\n`);
   if (anchor.harness === "claude") {
@@ -207,7 +241,7 @@ async function follow(anchor, show) {
   const pull = async () => {
     s = session(anchor) ?? s;
     try {
-      for (const m of (await call(s, "POST", "/deliver", { name: s.name }, false)).delivered) await show(full(m), s);
+      for (const text of await shown(s, (await call(s, "POST", "/deliver", { name: s.name }, false)).delivered)) await show(text, s);
     } catch (e) {
       console.error(`office: ${e.message}`);
     }
@@ -264,7 +298,7 @@ async function hook() {
       case "UserPromptSubmit": {
         await call(s, "POST", "/activity", { name: s.name, state: "thinking", detail: "" });
         const { delivered } = await call(s, "POST", "/deliver", { name: s.name });
-        if (delivered.length) console.log(delivered.map(full).join("\n\n"));
+        if (delivered.length) console.log((await shown(s, delivered)).join("\n\n"));
         return;
       }
       case "PreToolUse":
@@ -275,7 +309,7 @@ async function hook() {
         const { delivered } = await call(s, "POST", "/deliver", { name: s.name });
         const due = (await call(s, "POST", "/remind", { name: s.name })).filter((m) => !delivered.some((d) => d.id === m.id));
         const parts = [];
-        if (delivered.length) parts.push(...delivered.map(full));
+        if (delivered.length) parts.push(...(await shown(s, delivered)));
         if (due.length) parts.push(`[office] Still open in your mailbox, untouched since it arrived:\n${due.map(line).join("\n")}\nRead one again with \`office.mjs read <id> --reads 1\`, answer it, or close it.`);
         console.log(JSON.stringify(parts.length ? { decision: "block", reason: parts.join("\n\n") } : {}));
         return;
@@ -343,7 +377,7 @@ switch (cmd) {
     const [id] = ids(f._);
     if (id === undefined) die("usage: read <id> [--reads <times you have already read it>]");
     const m = await call(s, "POST", "/read", { name: s.name, id });
-    console.log(m ? lod(m, reads(f)) : `#${id} is not in your mailbox`);
+    console.log(m ? lod(reads(f) <= 0 ? await localize(s, m) : m, reads(f)) : `#${id} is not in your mailbox`);
     break;
   }
   case "done": {
@@ -374,16 +408,8 @@ switch (cmd) {
   }
   case "get": {
     const s = awake();
-    const url = f._[0];
-    if (!url) die("usage: get <url from a message>");
-    const res = await fetch(url, { headers: url.startsWith(s.url) ? { authorization: `Bearer ${s.token}` } : {} });
-    if (!res.ok) die(`get: HTTP ${res.status}`);
-    const ext = { "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp", "video/mp4": ".mp4" }[res.headers.get("content-type")] ?? "";
-    const dir = path.join(STATE, "files");
-    fs.mkdirSync(dir, { recursive: true });
-    const file = path.join(dir, `${Date.now()}-${path.basename(new URL(url).pathname).replace(/[^\w.-]/g, "_").slice(-60)}${ext}`);
-    fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
-    console.log(file);
+    if (!f._[0]) die("usage: get <url from a message>");
+    console.log(await download(s, f._[0]).catch((e) => die(`get: ${e.message}`)));
     break;
   }
   case "who": {

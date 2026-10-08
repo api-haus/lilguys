@@ -167,7 +167,7 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
     if (d.webhook_id && this.sql.exec("SELECT 1 FROM webhooks WHERE id = ?", d.webhook_id).toArray().length) return;
     const text = (d.content ?? "").trim();
     const files = [
-      ...(d.attachments ?? []).map((a: any) => `[${a.content_type ?? "file"} ${a.filename}] ${a.url}`),
+      ...(d.attachments ?? []).map((a: any) => `[${a.content_type ?? "file"} ${a.filename}] ${/^(video|audio)\//.test(a.content_type ?? "") ? "clip: " : ""}${a.url}`),
       ...(d.sticker_items ?? []).map((st: any) => `[sticker ${st.name}] https://media.discordapp.net/stickers/${st.id}.png`),
       ...[...new Set<string>(text.match(/<a?:\w+:\d+>/g) ?? [])].map((e) => {
         const [, animated, name, id] = e.match(/<(a?):(\w+):(\d+)>/)!;

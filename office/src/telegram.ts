@@ -14,6 +14,11 @@ export interface TelegramEnv {
 const RECEPTION = "reception";
 const TELEGRAM_LIMIT = 3500;
 const ADMINS_TTL_MS = 5 * 60_000;
+// Telegram serves every file as octet-stream; its path's extension is the only type it tells.
+const MIME: Record<string, string> = {
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif",
+  mp4: "video/mp4", webm: "video/webm", tgs: "application/x-tgsticker", oga: "audio/ogg", ogg: "audio/ogg", mp3: "audio/mpeg",
+};
 
 const roomOf = (name: string) => name.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").slice(0, 100) || "office";
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -116,26 +121,42 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
   }
 
   // Each file a message carries, as a line naming its kind and where the office serves it to keys.
+  // What moves is offered by its still, Telegram's own thumbnail, with the clip itself as `clip:`;
+  // an animated sticker or emoji is Lottie or webm and only its still can be looked at.
   attachments(msg: any) {
-    const url = (id: string) => `${this.env.OFFICE_URL}/files/telegram/${encodeURIComponent(id)}`;
-    const preview = (f: any) => (f?.thumbnail ? ` (still: ${url(f.thumbnail.file_id)})` : "");
     const out: string[] = [];
-    if (msg.photo?.length) out.push(`[photo] ${url(msg.photo.at(-1).file_id)}`);
-    for (const kind of ["animation", "video", "video_note", "sticker", "document", "audio", "voice"]) {
+    if (msg.photo?.length) out.push(`[photo] ${this.fileUrl(msg.photo.at(-1).file_id)}`);
+    for (const kind of ["animation", "video", "video_note"]) {
       const f = msg[kind];
-      const named = f?.file_name ?? [f?.emoji, f?.set_name].filter(Boolean).join(" ");
-      if (f && !(kind === "document" && msg.animation)) out.push(`[${kind}${named ? ` ${named}` : ""}] ${url(f.file_id)}${preview(f)}`);
+      if (!f) continue;
+      const clip = `clip: ${this.fileUrl(f.file_id)}`;
+      out.push(`[${kind}${f.file_name ? ` ${f.file_name}` : ""}] ${f.thumbnail ? `${this.fileUrl(f.thumbnail.file_id)} (${clip})` : clip}`);
+    }
+    if (msg.sticker) out.push(this.picture(`sticker ${[msg.sticker.emoji, msg.sticker.set_name].filter(Boolean).join(" ")}`, msg.sticker));
+    for (const kind of ["document", "audio", "voice"]) {
+      const f = msg[kind];
+      if (f && !(kind === "document" && msg.animation)) out.push(`[${kind}${f.file_name ? ` ${f.file_name}` : ""}] ${this.fileUrl(f.file_id)}`);
     }
     return out;
   }
 
-  // Custom emoji are stickers underneath; each distinct one in the text becomes a line like any file.
+  fileUrl(id: string) {
+    return `${this.env.OFFICE_URL}/files/telegram/${encodeURIComponent(id)}`;
+  }
+
+  picture(kind: string, sticker: any) {
+    const moving = sticker.is_animated || sticker.is_video;
+    if (!moving) return `[${kind}] ${this.fileUrl(sticker.file_id)}`;
+    return sticker.thumbnail ? `[${kind}, still] ${this.fileUrl(sticker.thumbnail.file_id)}` : `[${kind}] clip: ${this.fileUrl(sticker.file_id)}`;
+  }
+
+  // Custom emoji are stickers underneath; each distinct one in the text or caption becomes a picture line.
   async customEmoji(msg: any) {
-    const ids = [...new Set<string>((msg.entities ?? msg.caption_entities ?? []).filter((e: any) => e.type === "custom_emoji").map((e: any) => e.custom_emoji_id))];
+    const entities = [...(msg.entities ?? []), ...(msg.caption_entities ?? [])];
+    const ids = [...new Set<string>(entities.filter((e: any) => e.type === "custom_emoji").map((e: any) => e.custom_emoji_id))];
     if (!ids.length) return [];
     const stickers = await this.api<any[]>("getCustomEmojiStickers", { custom_emoji_ids: ids }).catch(() => []);
-    const url = (id: string) => `${this.env.OFFICE_URL}/files/telegram/${encodeURIComponent(id)}`;
-    return stickers.map((st) => `[custom emoji ${st.emoji ?? ""}] ${url(st.file_id)}${st.thumbnail ? ` (still: ${url(st.thumbnail.file_id)})` : ""}`);
+    return stickers.map((st) => this.picture(`custom emoji ${st.emoji ?? ""}`.trim(), st));
   }
 
   // Streams a file the bot can see, so its token never leaves the Worker.
@@ -143,7 +164,9 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     const f = await this.api<{ file_path?: string }>("getFile", { file_id: id }).catch(() => null);
     if (!f?.file_path) return new Response("not available", { status: 404 });
     const res = await fetch(`https://api.telegram.org/file/bot${this.env.TELEGRAM_TOKEN}/${f.file_path}`);
-    return new Response(res.body, { status: res.status, headers: { "content-type": res.headers.get("content-type") ?? "application/octet-stream" } });
+    const ext = f.file_path.split(".").pop()!.toLowerCase();
+    const type = MIME[ext] ?? res.headers.get("content-type") ?? "application/octet-stream";
+    return new Response(res.body, { status: res.status, headers: { "content-type": type } });
   }
 
   learn(name: string, thread: number) {
