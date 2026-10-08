@@ -77,6 +77,7 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
   // Points the bot's webhook at this Worker and reports what Telegram knows of the bot and the hook.
   async hook(url: string) {
     await this.api("setWebhook", { url, secret_token: await webhookSecret(this.env.TELEGRAM_TOKEN!), allowed_updates: ["message", "message_reaction"] });
+    await this.api("setChatMenuButton", { menu_button: { type: "web_app", text: "кухня", web_app: { url: `${this.env.OFFICE_URL}/kitchen` } } });
     const [me, info] = await Promise.all([this.api("getMe", {}), this.api("getWebhookInfo", {})]);
     const kv = Object.fromEntries(this.sql.exec<{ k: string; v: string }>("SELECT k, v FROM kv").toArray().map((r) => [r.k, r.v]));
     return {
@@ -111,6 +112,7 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
 
     const admin = String(msg.sender_chat?.id) === this.chat || (await this.isAdmin(msg.from?.id));
     if (admin && /^[!/]emoji(?:@\w+)?(?:\s|$)/i.test(text)) return void (await this.send(await this.teach(msg), thread));
+    if (/^[!/]kitchen(?:@\w+)?$/i.test(text)) return void (await this.kitchenButton(thread));
     const answer = admin ? command(this.sql, text) : null;
     if (answer !== null) return this.send(esc(answer), thread);
     const from = msg.from ?? {};
@@ -191,14 +193,51 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     return `the office now posts these as the group's own: ${stickers.map((st) => st.emoji).join(" ")}`;
   }
 
-  // Where the web pages find each coin's picture.
+  // Where the web pages find each coin's picture: served openly, it is the group's own emoji.
   coinArt() {
     return Object.fromEntries(
-      Object.entries(COINS).map(([coin, c]) => {
-        const e = this.emojiFor(c.icon);
-        return [coin, e?.still ? this.fileUrl(e.still) : null];
-      }),
+      Object.entries(COINS).map(([coin, c]) => [coin, this.emojiFor(c.icon)?.still ? `${this.env.OFFICE_URL}/coin/${coin}` : null]),
     );
+  }
+
+  async coinFile(coin: string) {
+    const still = this.emojiFor((COINS as any)[coin]?.icon ?? "")?.still;
+    return still ? this.file(still) : new Response("no art yet", { status: 404 });
+  }
+
+  // The Mini App's signed launch data, checked against the bot token as Telegram documents:
+  // secret = HMAC("WebAppData", token), hash = HMAC(secret, sorted key=value lines).
+  // Whoever it names is a person in the group, heard by the same rule as their messages.
+  async principal(initData: string) {
+    const params = new URLSearchParams(initData);
+    const hash = params.get("hash");
+    const age = Date.now() / 1000 - Number(params.get("auth_date"));
+    if (!hash || !(age < 24 * 3600)) return null;
+    params.delete("hash");
+    const check = [...params.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join("\n");
+    const hmac = async (key: BufferSource, data: string) =>
+      crypto.subtle.sign("HMAC", await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]), new TextEncoder().encode(data));
+    const secret = await hmac(new TextEncoder().encode("WebAppData"), this.env.TELEGRAM_TOKEN!);
+    const mine = [...new Uint8Array(await hmac(secret, check))].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const a = new TextEncoder().encode(mine), b = new TextEncoder().encode(hash.toLowerCase());
+    if (a.length !== b.length || !crypto.subtle.timingSafeEqual(a, b)) return null;
+    const user = JSON.parse(params.get("user") ?? "null");
+    if (!user) return null;
+    const full = [user.first_name, user.last_name].filter(Boolean).join(" ");
+    const heard = (await this.isAdmin(user.id)) || isAllowed(this.sql, [user.username, user.first_name, full]);
+    return heard ? { name: full || user.username } : null;
+  }
+
+  // A button that opens the kitchen as the bot's main Mini App, inside the chat it was asked from.
+  async kitchenButton(thread: number | null) {
+    const me = await this.api<{ username: string }>("getMe", {});
+    return this.api("sendMessage", {
+      chat_id: this.chat,
+      ...(thread ? { message_thread_id: thread } : {}),
+      text: this.dress("☕ кухня відкрита: кавомашина і вендінг, за муркоін🪙 і хрюкоін🐽"),
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: [[{ text: "☕ на кухню", url: `https://t.me/${me.username}?startapp=kitchen` }]] },
+    });
   }
 
   dress(html: string) {

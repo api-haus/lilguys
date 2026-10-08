@@ -83,3 +83,9 @@ To connect a group:
 4. `GET /telegram` (with the office token) points the bot's webhook at the Worker and reports the
    bot, whether it reads all group messages, the webhook's last error, the known topics and who is
    allowed.
+
+The kitchen is also the bot's Mini App. In BotFather, **Bot Settings → Configure Mini App** turns on
+the main Mini App with the URL `https://…workers.dev/kitchen`; then `!kitchen` in the group posts a
+button that opens it in the chat, and the bot's menu button opens it in a private chat. Inside
+Telegram the page is signed in as the Telegram user (their launch data is checked against the bot
+token), buys from that person's own wallet, and reaches nothing but the kitchen.

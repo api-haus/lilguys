@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Office Kitchen</title>
+<script src="https://telegram.org/js/telegram-web-app.js?64"></script>
 <style>
   :root { --bg:#f3efe6; --ink:#2b2a28; --dim:#8a857b; --card:#fffdf8; --line:#e2dccf; --me:#5b8def; --steel:#c9ccd1; --steel-dark:#9aa0a8; --glow:#7cb67f; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#1d1c1a; --ink:#ece7dc; --dim:#8f897d; --card:#272522; --line:#3a3732; --steel:#4a4e55; --steel-dark:#33363b; } }
@@ -30,6 +31,9 @@
   .drop { animation: drop .6s ease-in; }
   @keyframes drop { from { transform: translateY(-60px); opacity:0; } to { transform:none; opacity:1; } }
   .coin { width:1.3em; height:1.3em; vertical-align:-.3em; object-fit:contain; }
+  /* Inside Telegram the page wears the chat's own theme. */
+  body.tg { --bg:var(--tg-theme-bg-color); --ink:var(--tg-theme-text-color); --dim:var(--tg-theme-hint-color); --card:var(--tg-theme-section-bg-color, var(--tg-theme-secondary-bg-color)); --me:var(--tg-theme-button-color); --line:var(--tg-theme-section-separator-color, var(--tg-theme-hint-color)); }
+  body.tg header a, body.tg #who { display:none; }
   .steam { animation: steam 1.4s ease-in-out infinite; }
   @keyframes steam { 50% { transform: translateY(-4px) rotate(-3deg); } }
 </style>
@@ -47,23 +51,32 @@
 const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
 const hash = new URLSearchParams(location.hash.slice(1));
 if (hash.get("token")) { store.set("token", hash.get("token")); history.replaceState(null, "", location.pathname); }
-const token = store.get("token");
+const tg = window.Telegram?.WebApp;
+const inTelegram = !!tg?.initData;
+const token = inTelegram ? null : store.get("token");
 const $ = (id) => document.getElementById(id);
 const api = (route, body) => fetch(route, {
   method: body ? "POST" : "GET",
-  headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+  headers: { authorization: inTelegram ? `tma ${tg.initData}` : `Bearer ${token}`, "content-type": "application/json" },
   body: body && JSON.stringify(body),
 }).then((r) => r.json());
+if (inTelegram) {
+  document.body.classList.add("tg");
+  tg.ready();
+  tg.expand();
+  const u = tg.initDataUnsafe.user;
+  $("who").value = [u.first_name, u.last_name].filter(Boolean).join(" ") || u.username;
+}
 const COIN = { murkoin: "🪙", hrukoin: "🐽" };
 const coin = (c) => COIN[c];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-$("who").value = store.get("who") || "";
+if (!inTelegram) $("who").value = store.get("who") || "";
 $("who").onchange = () => { store.set("who", $("who").value.trim()); balance(); };
 
 async function balance() {
   const who = $("who").value.trim();
-  if (!who || !token) { $("balance").textContent = token ? "who's buying?" : "open with #token=… once"; return; }
+  if (!inTelegram && (!who || !token)) { $("balance").textContent = token ? "who's buying?" : "open with #token=… once, or from Telegram"; return; }
   const w = await api(`/coins?name=${encodeURIComponent(who)}`);
   $("balance").innerHTML = w.error ? w.error : `<b>${w.balance.murkoin}</b> ${coin("murkoin")} · <b>${w.balance.hrukoin}</b> ${coin("hrukoin")}`;
 }
@@ -84,11 +97,13 @@ function render(machines) {
         items.querySelectorAll("button").forEach((x) => x.disabled = true);
         tray.textContent = "";
         const out = await api("/buy", { name: who, item: it.id });
-        if (out.error) screen.textContent = out.error;
+        if (out.error) { screen.textContent = out.error; tg?.HapticFeedback?.notificationOccurred("error"); }
         else {
+          tg?.HapticFeedback?.impactOccurred("medium");
           for (const line of out.says) { screen.textContent = line; await sleep(700); }
           tray.innerHTML = `<span class="drop ${m.id === "coffee" ? "steam" : ""}">${it.icon}</span>`;
           screen.textContent = `${it.name} для ${who}. смачного`;
+          tg?.HapticFeedback?.notificationOccurred("success");
           balance();
         }
         items.querySelectorAll("button").forEach((x) => x.disabled = false);
@@ -101,9 +116,9 @@ function render(machines) {
 
 // The coins are drawn with the Telegram group's own custom emoji once the office has learned them.
 async function start() {
-  if (!token) return balance();
+  if (!inTelegram && !token) return balance();
   const art = await api("/coins/art").catch(() => ({}));
-  for (const [c, url] of Object.entries(art)) if (url) COIN[c] = `<img class="coin" src="${url}?token=${encodeURIComponent(token)}" alt="${COIN[c]}">`;
+  for (const [c, url] of Object.entries(art)) if (url) COIN[c] = `<img class="coin" src="${url}" alt="${COIN[c]}">`;
   render(await api("/menu"));
   balance();
 }

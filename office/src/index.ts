@@ -435,7 +435,27 @@ export default {
       await env.TELEGRAM.getByName(env.TELEGRAM_CHAT).update(await request.json());
       return json(undefined);
     }
-    const token = request.headers.get("authorization")?.replace(/^Bearer /, "") ?? url.searchParams.get("token");
+    const coinArt = url.pathname.match(/^\/coin\/(\w+)$/);
+    if (coinArt && env.TELEGRAM_TOKEN && env.TELEGRAM_CHAT) return env.TELEGRAM.getByName(env.TELEGRAM_CHAT).coinFile(coinArt[1]);
+
+    const authorization = request.headers.get("authorization") ?? "";
+    // Inside Telegram the kitchen is a Mini App: its buyer is the signed Telegram user, and it reaches only the kitchen.
+    if (authorization.startsWith("tma ") && env.TELEGRAM_TOKEN && env.TELEGRAM_CHAT) {
+      const person = await env.TELEGRAM.getByName(env.TELEGRAM_CHAT).principal(authorization.slice(4));
+      if (!person) return json({ error: "Telegram did not vouch for you, or the group does not hear you yet" }, 401);
+      const office = env.OFFICE.getByName(OFFICE_NAME);
+      const route = `${request.method} ${url.pathname}`;
+      if (route === "GET /menu") return json(MACHINES);
+      if (route === "GET /coins/art") return json(await env.TELEGRAM.getByName(env.TELEGRAM_CHAT).coinArt());
+      if (route === "GET /coins") return json(await office.wallet(person.name));
+      if (route === "POST /buy") {
+        const { item } = (await request.json()) as { item?: string };
+        const out = await office.buy(person.name, item ?? "");
+        return json(out, "error" in out ? 400 : 200);
+      }
+      return json({ error: "the Mini App reaches only the kitchen" }, 403);
+    }
+    const token = authorization.replace(/^Bearer /, "") || url.searchParams.get("token");
     const office = env.OFFICE.getByName(OFFICE_NAME);
     // The office's own key speaks for anyone; a person's key only for that person and the identities they woke.
     const owner = token === env.TOKEN ? null : token ? await office.whois(token) : null;
