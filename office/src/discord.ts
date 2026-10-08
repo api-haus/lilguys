@@ -13,7 +13,8 @@ export interface DiscordEnv {
 
 const API = "https://discord.com/api/v10";
 const GATEWAY = "https://gateway.discord.gg/?v=10&encoding=json";
-const INTENTS = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15); // GUILDS, GUILD_MESSAGES, DIRECT_MESSAGES, MESSAGE_CONTENT
+// GUILDS, GUILD_MESSAGES, GUILD_MESSAGE_REACTIONS, DIRECT_MESSAGES, MESSAGE_CONTENT
+const INTENTS = (1 << 0) | (1 << 9) | (1 << 10) | (1 << 12) | (1 << 15);
 const ADMINISTRATOR = 1n << 3n;
 const WATCHDOG_MS = 60_000;
 const DISCORD_LIMIT = 2000;
@@ -37,9 +38,10 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
       this.sql.exec(`
         CREATE TABLE IF NOT EXISTS gateway (k TEXT PRIMARY KEY, v TEXT);
         CREATE TABLE IF NOT EXISTS webhooks (channel TEXT PRIMARY KEY, id TEXT NOT NULL, token TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS posted (discord TEXT PRIMARY KEY, sender TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS posted (discord TEXT PRIMARY KEY, sender TEXT NOT NULL, office INTEGER);
         ${ALLOW_TABLE};
       `);
+      try { this.sql.exec("ALTER TABLE posted ADD COLUMN office INTEGER"); } catch {}
     });
   }
 
@@ -147,6 +149,8 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
           await this.private(p.d).catch((e) => this.setKv("error", `${new Date().toISOString()} ${e}`));
         } else if (p.t?.startsWith("CHANNEL_")) {
           this.channels = null;
+        } else if (p.t === "MESSAGE_REACTION_ADD" && p.d.guild_id === this.guild) {
+          await this.reacted(p.d).catch((e) => this.setKv("error", `${new Date().toISOString()} ${e}`));
         } else if (p.t === "GUILD_UPDATE" || p.t?.startsWith("GUILD_ROLE_")) {
           this.admins = null;
         }
@@ -191,7 +195,19 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
     const replied = d.message_reference?.message_id;
     const poster = replied ? this.sql.exec<{ sender: string }>("SELECT sender FROM posted WHERE discord = ?", replied).toArray()[0]?.sender : null;
     const [to, body] = addressee([text, ...files].filter(Boolean).join("\n"), names, poster ?? null);
-    await office.say(sender, body, to, channel.name, null, "discord");
+    const said = await office.say(sender, body, to, channel.name, null, "discord");
+    this.sql.exec("INSERT OR REPLACE INTO posted (discord, sender, office) VALUES (?, ?, ?)", d.id, sender, said.id);
+  }
+
+  async reacted(d: any) {
+    const user = d.member?.user;
+    if (!user || d.user_id === this.kv("me") || user.bot) return;
+    const heard = (await this.isAdmin(d.user_id, d.member.roles ?? [])) || isAllowed(this.sql, [user.username, user.global_name, d.member.nick, `<@${d.user_id}>`]);
+    const id = this.sql.exec<{ office: number | null }>("SELECT office FROM posted WHERE discord = ?", d.message_id).toArray()[0]?.office;
+    if (!heard || !id) return;
+    const custom = d.emoji.id ? `https://cdn.discordapp.com/emojis/${d.emoji.id}.${d.emoji.animated ? "gif" : "png"}` : null;
+    const who = d.member.nick ?? user.global_name ?? user.username;
+    await this.env.OFFICE.getByName(OFFICE_NAME).react(id, who, custom ? `:${d.emoji.name}:` : d.emoji.name, custom && `[custom emoji :${d.emoji.name}:] ${custom}`);
   }
 
   // ---- who the office listens to: server admins, and the people they allow ----
@@ -247,7 +263,7 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
         username: label(m.sender, from).slice(0, 80),
         allowed_mentions: { parse: [] },
       });
-      this.sql.exec("INSERT OR REPLACE INTO posted (discord, sender) VALUES (?, ?)", sent.id, m.sender);
+      this.sql.exec("INSERT OR REPLACE INTO posted (discord, sender, office) VALUES (?, ?, ?)", sent.id, m.sender, m.id);
     }
   }
 

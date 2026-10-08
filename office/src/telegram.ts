@@ -39,10 +39,11 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     ctx.blockConcurrencyWhile(async () => {
       this.sql.exec(`
         CREATE TABLE IF NOT EXISTS topics (room TEXT PRIMARY KEY, thread INTEGER NOT NULL UNIQUE);
-        CREATE TABLE IF NOT EXISTS posted (message INTEGER PRIMARY KEY, sender TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS posted (message INTEGER PRIMARY KEY, sender TEXT NOT NULL, office INTEGER);
         CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
         ${ALLOW_TABLE};
       `);
+      try { this.sql.exec("ALTER TABLE posted ADD COLUMN office INTEGER"); } catch {}
     });
   }
 
@@ -73,7 +74,7 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
 
   // Points the bot's webhook at this Worker and reports what Telegram knows of the bot and the hook.
   async hook(url: string) {
-    await this.api("setWebhook", { url, secret_token: await webhookSecret(this.env.TELEGRAM_TOKEN!), allowed_updates: ["message"] });
+    await this.api("setWebhook", { url, secret_token: await webhookSecret(this.env.TELEGRAM_TOKEN!), allowed_updates: ["message", "message_reaction"] });
     const [me, info] = await Promise.all([this.api("getMe", {}), this.api("getWebhookInfo", {})]);
     const kv = Object.fromEntries(this.sql.exec<{ k: string; v: string }>("SELECT k, v FROM kv").toArray().map((r) => [r.k, r.v]));
     return {
@@ -90,6 +91,7 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
   // ---- Telegram → office ----
 
   async update(u: any) {
+    if (u.message_reaction) return this.reacted(u.message_reaction).catch((e) => this.setKv("error", `${new Date().toISOString()} ${e}`));
     const msg = u.message;
     if (!msg || msg.from?.is_bot) return;
     if (msg.chat?.type === "private") return this.private(msg).catch((e) => this.setKv("error", `${new Date().toISOString()} ${e}`));
@@ -117,7 +119,30 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     const poster = replied ? this.sql.exec<{ sender: string }>("SELECT sender FROM posted WHERE message = ?", replied).toArray()[0]?.sender : null;
     const office = this.env.OFFICE.getByName(OFFICE_NAME);
     const [to, body] = addressee([text, ...files].filter(Boolean).join("\n"), await office.memberNames(), poster ?? null);
-    await office.say(full || from.username || "someone", body, to, room, null, "telegram");
+    const said = await office.say(full || from.username || "someone", body, to, room, null, "telegram");
+    this.sql.exec("INSERT OR REPLACE INTO posted (message, sender, office) VALUES (?, ?, ?)", msg.message_id, full || from.username || "someone", said.id);
+  }
+
+  // Only reactions added by someone the office hears, on a message it knows.
+  async reacted(r: any) {
+    if (String(r.chat?.id) !== this.chat) return;
+    const from = r.user;
+    const full = [from?.first_name, from?.last_name].filter(Boolean).join(" ");
+    const heard = r.actor_chat ? String(r.actor_chat.id) === this.chat : !!from && ((await this.isAdmin(from.id)) || isAllowed(this.sql, [from.username, from.first_name, full]));
+    const id = this.sql.exec<{ office: number | null }>("SELECT office FROM posted WHERE message = ?", r.message_id).toArray()[0]?.office;
+    if (!heard || !id) return;
+    const before = new Set((r.old_reaction ?? []).map((x: any) => JSON.stringify(x)));
+    const added = (r.new_reaction ?? []).filter((x: any) => !before.has(JSON.stringify(x)));
+    const office = this.env.OFFICE.getByName(OFFICE_NAME);
+    const who = r.actor_chat?.title ?? (full || from.username);
+    for (const x of added) {
+      if (x.type === "emoji") await office.react(id, who, x.emoji, null);
+      if (x.type === "custom_emoji") {
+        const [st] = await this.api<any[]>("getCustomEmojiStickers", { custom_emoji_ids: [x.custom_emoji_id] }).catch(() => []);
+        const picture = st ? this.picture(`custom emoji ${st.emoji ?? ""}`.trim(), st) : null;
+        await office.react(id, who, st?.emoji ? `${st.emoji} (custom)` : "custom emoji", picture);
+      }
+    }
   }
 
   // Each file a message carries, as a line naming its kind and where the office serves it to keys.
@@ -227,7 +252,7 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     const head = `<b>${esc(label(m.sender, from))}</b>${m.recipient ? ` → <b>${esc(m.recipient)}</b>` : ""}: `;
     for (let i = 0; i < m.text.length; i += TELEGRAM_LIMIT) {
       const sent = await this.send(head + esc(m.text.slice(i, i + TELEGRAM_LIMIT)), thread);
-      this.sql.exec("INSERT OR REPLACE INTO posted (message, sender) VALUES (?, ?)", sent.message_id, m.sender);
+      this.sql.exec("INSERT OR REPLACE INTO posted (message, sender, office) VALUES (?, ?, ?)", sent.message_id, m.sender, m.id);
     }
   }
 

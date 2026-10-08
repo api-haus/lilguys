@@ -59,6 +59,9 @@ export class Office extends DurableObject<Env> {
         CREATE TABLE IF NOT EXISTS log (
           id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, name TEXT NOT NULL,
           kind TEXT NOT NULL CHECK (kind IN ('entry','pending','priority')), text TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS reactions (
+          message INTEGER NOT NULL REFERENCES messages(id), who TEXT NOT NULL, emoji TEXT NOT NULL, at INTEGER NOT NULL,
+          PRIMARY KEY (message, who, emoji));
         CREATE TABLE IF NOT EXISTS people (owner TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, issued INTEGER NOT NULL);
       `);
       // Databases created before the mailbox.
@@ -215,7 +218,29 @@ export class Office extends DurableObject<Env> {
   // Only what was mailed to this identity can be read or closed by it.
   read(name: string, id: number) {
     const hit = this.sql.exec("UPDATE mail SET touched = 1 WHERE name = ? AND message = ? RETURNING message", name, id).toArray();
-    return hit.length ? this.sql.exec<Message>("SELECT * FROM messages WHERE id = ?", id).one() : null;
+    if (!hit.length) return null;
+    const reactions = this.sql.exec<{ who: string; emoji: string }>("SELECT who, emoji FROM reactions WHERE message = ? ORDER BY at", id).toArray();
+    return { ...this.sql.exec<Message>("SELECT * FROM messages WHERE id = ?", id).one(), reactions };
+  }
+
+  // A reaction in a messenger, kept on the message, and mailed to the agent it concerns: whoever
+  // said it, or else whoever it was addressed to. It is not relayed; the messengers show their own.
+  react(id: number, who: string, emoji: string, picture: string | null) {
+    const m = this.sql.exec<Message>("SELECT * FROM messages WHERE id = ?", id).toArray()[0];
+    if (!m) return;
+    const fresh = this.sql.exec("INSERT OR IGNORE INTO reactions (message, who, emoji, at) VALUES (?, ?, ?, ?) RETURNING message", id, who, emoji, Date.now()).toArray();
+    const agent = [m.sender, m.recipient].find((n) => n && n !== who && this.member(n));
+    if (!fresh.length || !agent) return;
+    const text = `reacted ${emoji} to #${id} "${m.brief}"${picture ? `\n${picture}` : ""}`;
+    const note = this.sql
+      .exec<Message>(
+        "INSERT INTO messages (at, room, sender, recipient, brief, text) VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
+        Date.now(), m.room, who, agent, briefOf(text), text,
+      )
+      .one();
+    this.sql.exec("INSERT INTO mail (name, message) VALUES (?, ?)", agent, note.id);
+    this.broadcast({ t: "message", message: note });
+    this.broadcast({ t: "mail", name: agent });
   }
 
   close(name: string, ids: number[]) {

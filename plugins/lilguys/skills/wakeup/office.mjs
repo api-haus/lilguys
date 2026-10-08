@@ -143,7 +143,13 @@ const line = (m) => `- ${origin(m)}: ${m.brief}`;
 // Level of detail by how many times the agent says it has already read a thing: the first read is
 // whole, the second a clipped glance, every later one the brief alone.
 const GLANCE_CHARS = 280;
+const reacted = (m) => (m.reactions?.length ? `\nreactions: ${m.reactions.map((r) => `${r.emoji} ${r.who}`).join(", ")}` : "");
+
 function lod(m, reads) {
+  return lodText(m, reads) + reacted(m);
+}
+
+function lodText(m, reads) {
   if (reads <= 0) return full(m);
   if (reads === 1 && m.text.length > m.brief.length) {
     const clipped = m.text.length > GLANCE_CHARS ? `${m.text.slice(0, GLANCE_CHARS)}… (${m.text.length - GLANCE_CHARS} more chars)` : m.text;

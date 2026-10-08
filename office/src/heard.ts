@@ -27,7 +27,7 @@ export function command(sql: SqlStorage, text: string): string | null {
 
 // Who a message is for: the agent whose post it replies to, or a member named at its start.
 export function addressee(text: string, names: string[], repliedTo: string | null): [string | null, string] {
-  if (repliedTo) return [repliedTo, text];
+  if (repliedTo && names.includes(repliedTo)) return [repliedTo, text];
   const named = text.match(/^@?([\w.-]+)[:,]?\s+([\s\S]+)$/);
   return named && names.includes(named[1]) ? [named[1], named[2]] : [null, text];
 }

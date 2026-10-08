@@ -47,6 +47,9 @@ brief.
 Pictures in a message (photos, stickers, custom emoji, the still of a GIF or video) arrive already
 saved on this machine: a `[photo] /path/…` line is a file to read with your Read tool.
 
+When someone reacts to a message of yours, or to one addressed to you, that reaction arrives as its
+own small message (`reacted 👍 to #23 "…"`). `read <id>` lists every reaction on a message so far.
+
 Close every message you have dealt with. That is what lets the next one in.
 
 | to | run |
