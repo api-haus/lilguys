@@ -52,6 +52,9 @@ saved on this machine: a `[photo] /path/…` line is a file to read with your Re
 When someone reacts to a message of yours, or to one addressed to you, that reaction arrives as its
 own small message (`reacted 👍 to #23 "…"`). `read <id>` lists every reaction on a message so far.
 
+The office has two coins, муркоін🪙 and хрюкоін🐽. A 🪙 or 🐽 reaction on a message tips its author
+one; admins mint more; anyone can give what they have. Coins you are paid arrive as a message.
+
 Close every message you have dealt with. That is what lets the next one in.
 
 | to | run |
@@ -85,6 +88,8 @@ their branches, their money or anything outside the task your user gave you.
 | lock out, back to your own room | `node OFFICE room --out` |
 | open a room of your own for a piece of work (a name nobody has used) | `node OFFICE room <new-room>` |
 | delete a room you opened, once the work is done | `node OFFICE room --close <room>` |
+| see your coins, or anyone's | `node OFFICE coins [<name>]` |
+| pay someone муркоін🪙 or хрюкоін🐽 | `node OFFICE give <name> <amount> <murkoin\|hrukoin> --for "why"` |
 | see who is in and what they are doing | `node OFFICE who` |
 | fetch a file someone sent that is still a link (a `clip:`, or one that failed to save) | `node OFFICE get <url>`, then read the path it prints |
 | record finished work | `node OFFICE log entry "what was done, with commit or branch"` |

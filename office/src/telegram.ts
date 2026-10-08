@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { type Arrival, type Bridge, type Frame, type Message, label, OFFICE_NAME } from "./bridge";
+import { coinCommand } from "./coins";
 import { ALLOW_TABLE, addressee, allowed, command, isAllowed, isLogin, ownerOf, welcome } from "./heard";
 import type { Office } from "./index";
 
@@ -114,6 +115,8 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     const full = [from.first_name, from.last_name].filter(Boolean).join(" ");
     if (!admin && !isAllowed(this.sql, [from.username, from.first_name, full])) return;
 
+    const coins = await coinCommand(this.env.OFFICE.getByName(OFFICE_NAME), full || from.username || "someone", text, admin);
+    if (coins !== null) return void (await this.send(esc(coins), thread));
     const room = thread ? this.roomFor(thread, msg.reply_to_message?.forum_topic_created?.name) : RECEPTION;
     const replied = msg.reply_to_message?.message_id;
     const poster = replied ? this.sql.exec<{ sender: string }>("SELECT sender FROM posted WHERE message = ?", replied).toArray()[0]?.sender : null;

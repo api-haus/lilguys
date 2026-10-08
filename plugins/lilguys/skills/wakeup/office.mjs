@@ -437,6 +437,22 @@ switch (cmd) {
     );
     break;
   }
+  case "coins": {
+    const s = awake();
+    const w = await call(s, "GET", "/coins", { name: f._[0] ?? s.name });
+    console.log(`${w.name}: ${w.balance.murkoin} муркоін🪙, ${w.balance.hrukoin} хрюкоін🐽`);
+    for (const r of w.recent) console.log(`- ${when(r.at)} ${r.payer ?? "minted"} → ${r.payee}: ${r.amount} ${r.coin}${r.why ? ` (${r.why})` : ""}`);
+    break;
+  }
+  case "give": {
+    const s = awake();
+    const [to, amount, coin] = f._;
+    const COIN = { murkoin: "murkoin", "муркоін": "murkoin", "🪙": "murkoin", hrukoin: "hrukoin", "хрюкоін": "hrukoin", "🐽": "hrukoin" }[coin?.toLowerCase()];
+    if (!to || !Number(amount) || !COIN) die("usage: give <name> <amount> <murkoin|hrukoin> [--for <why>]");
+    const out = await call(s, "POST", "/give", { name: s.name, to, amount: Number(amount), coin: COIN, why: f.for });
+    console.log(`Paid ${out.payee} ${out.paid}. You have ${out.balance.murkoin} муркоін🪙, ${out.balance.hrukoin} хрюкоін🐽.`);
+    break;
+  }
   case "who": {
     const s = awake();
     const { members } = await call(s, "GET", "/state");
@@ -447,5 +463,5 @@ switch (cmd) {
     await sleep(f);
     break;
   default:
-    die("commands: wakeup [identity] · mail · read · done · say · room · get · briefing · log · who · sleep (and listen, relay, hook for the plugin itself)");
+    die("commands: wakeup [identity] · mail · read · done · say · room · coins · give · get · briefing · log · who · sleep (and listen, relay, hook for the plugin itself)");
 }

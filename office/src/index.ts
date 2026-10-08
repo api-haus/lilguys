@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import page from "./floor.html";
 import { type Bridge, type Frame, type Message, OFFICE_NAME, ownerIcon } from "./bridge";
+import { type Coin, COINS, show, tipOf } from "./coins";
 import { Discord, type DiscordEnv } from "./discord";
 import { Telegram, type TelegramEnv, webhookSecret } from "./telegram";
 
@@ -63,6 +64,9 @@ export class Office extends DurableObject<Env> {
           message INTEGER NOT NULL REFERENCES messages(id), who TEXT NOT NULL, emoji TEXT NOT NULL, at INTEGER NOT NULL,
           PRIMARY KEY (message, who, emoji));
         CREATE TABLE IF NOT EXISTS rooms (name TEXT PRIMARY KEY, opener TEXT NOT NULL, at INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS coins (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, coin TEXT NOT NULL, amount INTEGER NOT NULL CHECK (amount > 0),
+          payer TEXT, payee TEXT NOT NULL, why TEXT NOT NULL DEFAULT '');
         CREATE TABLE IF NOT EXISTS owners (owner TEXT PRIMARY KEY, icon TEXT NOT NULL UNIQUE);
         CREATE TABLE IF NOT EXISTS people (owner TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, issued INTEGER NOT NULL);
       `);
@@ -242,15 +246,52 @@ export class Office extends DurableObject<Env> {
     return { ...this.sql.exec<Message>("SELECT * FROM messages WHERE id = ?", id).one(), reactions };
   }
 
+  // The office's two coins. A payment with no payer is minted: by an admin, or by a coin reaction.
+  balance(name: string): Record<Coin, number> {
+    const rows = this.sql
+      .exec<{ coin: Coin; n: number }>(
+        "SELECT coin, SUM(CASE WHEN payee = ?1 THEN amount ELSE 0 END) - SUM(CASE WHEN payer = ?1 THEN amount ELSE 0 END) AS n FROM coins WHERE payee = ?1 OR payer = ?1 GROUP BY coin",
+        name,
+      )
+      .toArray();
+    return Object.fromEntries((Object.keys(COINS) as Coin[]).map((c) => [c, rows.find((r) => r.coin === c)?.n ?? 0])) as Record<Coin, number>;
+  }
+
+  wallet(name: string) {
+    const recent = this.sql
+      .exec("SELECT at, coin, amount, payer, payee, why FROM coins WHERE payee = ?1 OR payer = ?1 ORDER BY id DESC LIMIT 5", name)
+      .toArray();
+    return { name, balance: this.balance(name), recent };
+  }
+
+  pay(coin: Coin, amount: number, payer: string | null, payee: string, why: string) {
+    if (!COINS[coin] || !Number.isInteger(amount) || amount <= 0) return { error: "an amount is a whole number above zero, of муркоін or хрюкоін" };
+    if (payer === payee) return { error: "paying yourself changes nothing" };
+    if (payer && this.balance(payer)[coin] < amount) return { error: `${payer} has only ${show(coin, this.balance(payer)[coin])}` };
+    this.sql.exec("INSERT INTO coins (at, coin, amount, payer, payee, why) VALUES (?, ?, ?, ?, ?, ?)", Date.now(), coin, amount, payer, payee, why);
+    if (this.member(payee)) {
+      const text = `${payer ? `${payer} paid you` : "you were minted"} ${show(coin, amount)}${why ? ` for ${why}` : ""}`;
+      const note = this.sql
+        .exec<Message>("INSERT INTO messages (at, room, sender, recipient, brief, text) VALUES (?, ?, ?, ?, ?, ?) RETURNING *", Date.now(), this.member(payee)!.room, payer ?? "office", payee, briefOf(text), text)
+        .one();
+      this.sql.exec("INSERT INTO mail (name, message) VALUES (?, ?)", payee, note.id);
+      this.broadcast({ t: "message", message: note });
+      this.broadcast({ t: "mail", name: payee });
+    }
+    return { paid: show(coin, amount), payer, payee, balance: payer ? this.balance(payer) : null };
+  }
+
   // A reaction in a messenger, kept on the message, and mailed to the agent it concerns: whoever
   // said it, or else whoever it was addressed to. It is not relayed; the messengers show their own.
   react(id: number, who: string, emoji: string, picture: string | null) {
     const m = this.sql.exec<Message>("SELECT * FROM messages WHERE id = ?", id).toArray()[0];
     if (!m) return;
     const fresh = this.sql.exec("INSERT OR IGNORE INTO reactions (message, who, emoji, at) VALUES (?, ?, ?, ?) RETURNING message", id, who, emoji, Date.now()).toArray();
+    const tip = fresh.length && m.sender !== who ? tipOf(emoji) : null;
+    if (tip) this.sql.exec("INSERT INTO coins (at, coin, amount, payer, payee, why) VALUES (?, ?, 1, NULL, ?, ?)", Date.now(), tip, m.sender, `${who}'s reaction to #${id}`);
     const agent = [m.sender, m.recipient].find((n) => n && n !== who && this.member(n));
     if (!fresh.length || !agent) return;
-    const text = `reacted ${emoji} to #${id} "${m.brief}"${picture ? `\n${picture}` : ""}`;
+    const text = `reacted ${emoji} to #${id} "${m.brief}"${tip && agent === m.sender ? `, tipping you ${show(tip, 1)}` : ""}${picture ? `\n${picture}` : ""}`;
     const note = this.sql
       .exec<Message>(
         "INSERT INTO messages (at, room, sender, recipient, brief, text) VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
@@ -445,6 +486,14 @@ export default {
         if (err) return err;
         const out = await office.closeRoom(b.name, b.room);
         return json(out, "error" in out ? 403 : 200);
+      }
+      case "GET /coins":
+        return missing("name") ?? json(await office.wallet(b.name));
+      case "POST /give": {
+        const err = missing("name", "to", "coin");
+        if (err) return err;
+        const out = await office.pay(b.coin, b.amount, b.name, b.to, b.why ?? "");
+        return json(out, "error" in out ? 400 : 200);
       }
       case "POST /sleep":
         return missing("name") ?? json(await office.sleep(b.name, b.entry, b.pending, b.priority));

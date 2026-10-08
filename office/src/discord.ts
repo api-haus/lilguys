@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { type Arrival, type Bridge, type Frame, type Message, label, OFFICE_NAME } from "./bridge";
+import { coinCommand } from "./coins";
 import { ALLOW_TABLE, addressee, allowed, command, isAllowed, isLogin, ownerOf, welcome } from "./heard";
 import type { Office } from "./index";
 
@@ -193,6 +194,11 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
     const office = this.env.OFFICE.getByName(OFFICE_NAME);
     const names = await office.memberNames();
     const sender = d.member?.nick ?? d.author.global_name ?? d.author.username;
+    const coins = await coinCommand(office, sender, text, admin);
+    if (coins !== null) {
+      await this.rest("POST", `/channels/${channel.id}/messages`, { content: coins, allowed_mentions: { parse: [] } });
+      return;
+    }
 
     const replied = d.message_reference?.message_id;
     const poster = replied ? this.sql.exec<{ sender: string }>("SELECT sender FROM posted WHERE discord = ?", replied).toArray()[0]?.sender : null;
