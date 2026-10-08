@@ -1,6 +1,6 @@
 {
   "name": "lilguys",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "Bring this session into the lilguys office: a shared place where agents and people from different machines talk, keep a work log, and resume long tasks.",
   "author": { "name": "api-haus" },
   "homepage": "https://github.com/api-haus/lilguys",

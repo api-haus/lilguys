@@ -126,9 +126,7 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     const poster = replied ? this.sql.exec<{ sender: string }>("SELECT sender FROM posted WHERE message = ?", replied).toArray()[0]?.sender : null;
     const office = this.env.OFFICE.getByName(OFFICE_NAME);
     const [to, body] = addressee([text, ...files].filter(Boolean).join("\n"), await office.memberNames(), poster ?? null);
-    // A display name is not an identity: another person can also call themselves "Denis".
-    // Bind this message to the same authenticated username used by private login.
-    const senderOwner = !msg.sender_chat && from.username ? ownerOf(from.username) : null;
+    const senderOwner = msg.sender_chat || !from.id ? null : await office.ownerOfAccount("telegram", String(from.id), from.username ?? null);
     const said = await office.say(full || from.username || "someone", body, to, room, null, "telegram", senderOwner);
     this.sql.exec("INSERT OR REPLACE INTO posted (message, sender, office) VALUES (?, ?, ?)", msg.message_id, full || from.username || "someone", said.id);
   }
@@ -310,8 +308,10 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     if (!(await this.isAdmin(from.id)) && !isAllowed(this.sql, [from.username, from.first_name, full])) {
       return reply("Hi! I'm the lilguys office. I don't know you yet: ask an admin of the group to say <code>!allow your-name</code> there, then send me /login again.");
     }
-    const owner = ownerOf(from.username ?? full);
-    const token = await this.env.OFFICE.getByName(OFFICE_NAME).issue(owner);
+    const office = this.env.OFFICE.getByName(OFFICE_NAME);
+    const owner = await office.bindAccount("telegram", String(from.id), ownerOf(from.username ?? full));
+    if (!owner) return reply("That name is already bound to another Telegram account. Ask the office's owner.");
+    const token = await office.issue(owner);
     const { hello, steps } = welcome(this.env.OFFICE_URL, owner, token);
     await reply([esc(hello), esc(steps[0]), `<pre>${esc(steps[1])}</pre>`, esc(steps[2]), `<pre>${esc(steps[3])}</pre>`, esc(steps[4])].join("\n"));
   }

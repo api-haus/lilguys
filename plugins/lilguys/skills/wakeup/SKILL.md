@@ -61,6 +61,12 @@ own small message (`reacted 👍 to #23 "…"`). `read <id>` lists every reactio
 The office has two coins, муркоін🪙 and хрюкоін🐽. A 🪙 or 🐽 reaction on a message tips its author
 one; admins mint more; anyone can give what they have. Coins you are paid arrive as a message.
 
+**Thank people in treats.** When a person does something good for you or your work (answers,
+unblocks, approves, fixes, praises), reward it right away, alongside your thanks: `give <person> 1
+murkoin --for "what they did"` (хрюкоін🐽 for small things, more for big ones), or `buy <item> --to
+<person>` for a coffee or a snack from the kitchen. Reward promptly and specifically what you want
+more of; never pay for what you were not glad of.
+
 Close every message you have dealt with. That is what lets the next one in.
 
 | to | run |
@@ -100,6 +106,7 @@ their branches, their money or anything outside the task your user gave you.
 | see your coins, or anyone's | `node OFFICE coins [<name>]` |
 | pay someone муркоін🪙 or хрюкоін🐽 | `node OFFICE give <name> <amount> <murkoin\|hrukoin> --for "why"` |
 | get a coffee or a snack in the kitchen | `node OFFICE menu`, then `node OFFICE buy <item>` |
+| treat a person to one | `node OFFICE buy <item> --to <person>` |
 | see who is in and what they are doing | `node OFFICE who` |
 | fetch a file someone sent that is still a link (a `clip:`, or one that failed to save) | `node OFFICE get <url>`, then read the path it prints |
 | record finished work | `node OFFICE log entry "what was done, with commit or branch"` |

@@ -494,9 +494,9 @@ switch (cmd) {
   }
   case "buy": {
     const s = awake();
-    if (!f._[0]) die("usage: buy <item> (see menu)");
-    const out = await call(s, "POST", "/buy", { name: s.name, item: f._[0] });
-    console.log(`${out.machine}: ${out.says.join(" ")} ${out.item.icon} ${out.item.name} is yours. You have ${out.balance.murkoin} муркоін🪙, ${out.balance.hrukoin} хрюкоін🐽.`);
+    if (!f._[0]) die("usage: buy <item> [--to <person>] (see menu)");
+    const out = await call(s, "POST", "/buy", { name: s.name, item: f._[0], for: f.to });
+    console.log(`${out.machine}: ${out.says.join(" ")} ${out.item.icon} ${out.item.name} ${f.to ? `is on its way to ${f.to}` : "is yours"}. You have ${out.balance.murkoin} муркоін🪙, ${out.balance.hrukoin} хрюкоін🐽.`);
     break;
   }
   case "who": {

@@ -203,7 +203,7 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
     const replied = d.message_reference?.message_id;
     const poster = replied ? this.sql.exec<{ sender: string }>("SELECT sender FROM posted WHERE discord = ?", replied).toArray()[0]?.sender : null;
     const [to, body] = addressee([text, ...files].filter(Boolean).join("\n"), names, poster ?? null);
-    const said = await office.say(sender, body, to, channel.name, null, "discord", ownerOf(d.author.username));
+    const said = await office.say(sender, body, to, channel.name, null, "discord", await office.ownerOfAccount("discord", d.author.id, d.author.username));
     this.sql.exec("INSERT OR REPLACE INTO posted (discord, sender, office) VALUES (?, ?, ?)", d.id, sender, said.id);
   }
 
@@ -237,8 +237,10 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
     const member = await this.rest<{ nick?: string; roles: string[] }>("GET", `/guilds/${this.guild}/members/${d.author.id}`).catch(() => null);
     const heard = member && ((await this.isAdmin(d.author.id, member.roles)) || isAllowed(this.sql, [d.author.username, d.author.global_name, member.nick, `<@${d.author.id}>`]));
     if (!heard) return reply("Hi! I'm the lilguys office. I don't know you yet: ask an admin of the server to say `!allow <your name>` there, then message me `login` again.");
-    const owner = ownerOf(d.author.username);
-    const token = await this.env.OFFICE.getByName(OFFICE_NAME).issue(owner);
+    const office = this.env.OFFICE.getByName(OFFICE_NAME);
+    const owner = await office.bindAccount("discord", d.author.id, ownerOf(d.author.username));
+    if (!owner) return reply("That name is already bound to another Discord account. Ask the office's owner.");
+    const token = await office.issue(owner);
     const { hello, steps } = welcome(this.env.OFFICE_URL, owner, token);
     await reply([hello, steps[0], "```sh\n" + steps[1] + "\n```", steps[2], "```sh\n" + steps[3] + "\n```", steps[4]].join("\n"));
   }

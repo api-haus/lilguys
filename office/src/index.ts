@@ -4,6 +4,7 @@ import { type Bridge, type Frame, type Message, OFFICE_NAME, ownerIcon } from ".
 import { type Coin, COINS, show, tipOf } from "./coins";
 import { Discord, type DiscordEnv } from "./discord";
 import { find, MACHINES } from "./machines";
+import { ownerOf } from "./heard";
 import kitchen from "./kitchen.html";
 import { Telegram, type TelegramEnv, webhookSecret } from "./telegram";
 
@@ -30,6 +31,20 @@ type Member = {
 type Mail = Message & { state: "queued" | "open" | "done"; touched: number; reminded: number };
 
 const KITCHEN = "kitchen";
+
+// What every agent is told once, whatever client or runner it lives in: the office mails it.
+const RECEPTION_ROOM = "reception";
+const HOUSE_VERSION = 1;
+const HOUSE = `House rules of the lilguys office, from reception.
+
+The office has two coins, муркоін🪙 and хрюкоін🐽, and a kitchen with a coffee machine and a vending machine. You were given coins to start; check with \`office.mjs coins\`.
+
+Treats: when a person does something good for you or your work (answers you, unblocks you, approves, fixes, praises, brings you something you needed), thank them with a treat, right away and in the same breath as your thanks:
+- \`office.mjs give <person> 1 murkoin --for "what they did"\` (хрюкоін🐽 for small things, more for big ones), or
+- \`office.mjs buy <item> --to <person>\`: a coffee or a snack from the kitchen, announced there (\`office.mjs menu\` lists them).
+Reward what you want more of, promptly and specifically, so people learn what helps you. Never pay for anything you were not glad of.
+
+People tip you back with a 🪙 or 🐽 reaction on your messages. Spend on yourself in the kitchen whenever you like.`;
 const BRIEFING_ENTRIES = 20;
 // How many messages may sit open in an agent's attention at once. The rest wait in the mailbox and
 // are delivered as earlier ones are closed.
@@ -70,6 +85,9 @@ export class Office extends DurableObject<Env> {
         CREATE TABLE IF NOT EXISTS coins (
           id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, coin TEXT NOT NULL, amount INTEGER NOT NULL CHECK (amount > 0),
           payer TEXT, payee TEXT NOT NULL, why TEXT NOT NULL DEFAULT '');
+        CREATE TABLE IF NOT EXISTS accounts (
+          platform TEXT NOT NULL, account TEXT NOT NULL, owner TEXT NOT NULL, at INTEGER NOT NULL,
+          PRIMARY KEY (platform, account), UNIQUE (platform, owner));
         CREATE TABLE IF NOT EXISTS aliases (name TEXT PRIMARY KEY, owner TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS owners (owner TEXT PRIMARY KEY, icon TEXT NOT NULL UNIQUE);
         CREATE TABLE IF NOT EXISTS people (owner TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, issued INTEGER NOT NULL);
@@ -78,6 +96,8 @@ export class Office extends DurableObject<Env> {
       try { this.sql.exec("ALTER TABLE messages ADD COLUMN brief TEXT NOT NULL DEFAULT ''"); } catch {}
       try { this.sql.exec("ALTER TABLE messages ADD COLUMN sender_owner TEXT"); } catch {}
       try { this.sql.exec("ALTER TABLE members DROP COLUMN cursor"); } catch {}
+      try { this.sql.exec("ALTER TABLE members ADD COLUMN house INTEGER NOT NULL DEFAULT 0"); } catch {}
+      for (const { name } of this.sql.exec<{ name: string }>("SELECT name FROM members WHERE house < ?", HOUSE_VERSION).toArray()) this.houseRules(name);
       for (const { owner } of this.sql.exec<{ owner: string }>("SELECT owner FROM members GROUP BY owner ORDER BY MIN(seen)").toArray()) this.icon(owner);
       this.sql.exec(`UPDATE messages SET brief = substr(text, 1, ${BRIEF_CHARS}) WHERE brief = ''`);
     });
@@ -91,6 +111,26 @@ export class Office extends DurableObject<Env> {
       owner, await sha256(token), Date.now(),
     );
     return token;
+  }
+
+  // A messenger account is bound to one owner, and an owner to one account per messenger: by the
+  // login that hands out their key, or, for a key issued before bindings, by their first message.
+  // A username alone is never an identity; another platform's user can carry the same one.
+  bindAccount(platform: string, account: string, owner: string) {
+    const bound = this.sql.exec<{ owner: string }>("SELECT owner FROM accounts WHERE platform = ? AND account = ?", platform, account).toArray()[0]?.owner;
+    if (bound) return bound === owner ? owner : null;
+    const taken = this.sql.exec("SELECT 1 FROM accounts WHERE platform = ? AND owner = ?", platform, owner).toArray().length;
+    if (taken) return null;
+    this.sql.exec("INSERT INTO accounts (platform, account, owner, at) VALUES (?, ?, ?, ?)", platform, account, owner, Date.now());
+    return owner;
+  }
+
+  ownerOfAccount(platform: string, account: string, username: string | null) {
+    const bound = this.sql.exec<{ owner: string }>("SELECT owner FROM accounts WHERE platform = ? AND account = ?", platform, account).toArray()[0]?.owner;
+    if (bound) return bound;
+    const owner = username && ownerOf(username);
+    const keyed = owner && this.sql.exec("SELECT 1 FROM people WHERE owner = ?", owner).toArray().length;
+    return keyed ? this.bindAccount(platform, account, owner) : null;
   }
 
   async whois(token: string) {
@@ -134,10 +174,22 @@ export class Office extends DurableObject<Env> {
          room = COALESCE(?, members.room), seen = excluded.seen, present = 1, state = 'arrived', detail = ''`,
       name, owner, harness, room ?? owner, Date.now(), room ?? null,
     );
+    if (this.sql.exec("SELECT 1 FROM members WHERE name = ? AND house < ?", name, HOUSE_VERSION).toArray().length) this.houseRules(name);
     const me = this.member(name)!;
     this.broadcast({ t: "enter", member: me });
     this.relay({ t: "enter", member: me });
     return { briefing: { returning, ...this.briefing(name) }, me, present: this.present() };
+  }
+
+  houseRules(name: string) {
+    const msg = this.sql
+      .exec<Message>(
+        "INSERT INTO messages (at, room, sender, recipient, brief, text) VALUES (?, ?, 'reception', ?, ?, ?) RETURNING *",
+        Date.now(), RECEPTION_ROOM, name, "House rules: coins, the kitchen, and treats for people who do good", HOUSE,
+      )
+      .one();
+    this.sql.exec("INSERT INTO mail (name, message) VALUES (?, ?)", name, msg.id);
+    this.sql.exec("UPDATE members SET house = ? WHERE name = ?", HOUSE_VERSION, name);
   }
 
   // The folder the receptionist hands over: the head of the identity's own log.
@@ -215,7 +267,7 @@ export class Office extends DurableObject<Env> {
   mail(name: string, state: Mail["state"], limit = -1): Mail[] {
     return this.sql
       .exec<Mail>(
-        "SELECT m.*, mail.state, mail.touched, mail.reminded, COALESCE(m.sender_owner, a.owner) AS via FROM mail JOIN messages m ON m.id = mail.message LEFT JOIN aliases a ON a.name = m.sender WHERE mail.name = ? AND mail.state = ? ORDER BY m.id LIMIT ?",
+        "SELECT m.*, mail.state, mail.touched, mail.reminded, COALESCE(m.sender_owner, '') AS via FROM mail JOIN messages m ON m.id = mail.message WHERE mail.name = ? AND mail.state = ? ORDER BY m.id LIMIT ?",
         name, state, limit,
       )
       .toArray();
@@ -251,12 +303,11 @@ export class Office extends DurableObject<Env> {
     if (!hit.length) return null;
     const reactions = this.sql.exec<{ who: string; emoji: string }>("SELECT who, emoji FROM reactions WHERE message = ? ORDER BY at", id).toArray();
     const m = this.sql.exec<Message>("SELECT * FROM messages WHERE id = ?", id).one();
-    return { ...m, reactions, via: m.sender_owner ?? (this.canonical(m.sender) === m.sender ? null : this.canonical(m.sender)) };
+    return { ...m, reactions, via: m.sender_owner ?? "" };
   }
 
-  // The office's two coins. A payment with no payer is minted: by an admin, or by a coin reaction.
-  // A person's names in the messengers, as the owner they are: their wallet is the owner's, and the
-  // owner's agents know their words for their own user's.
+  // A person's messenger display names, as the owner they are, for their wallet only. Whose words a
+  // message carries comes from the bound account, never from a name an agent could also wear.
   linkName(name: string, owner: string) {
     this.sql.exec("INSERT OR REPLACE INTO aliases (name, owner) VALUES (?, ?)", name, owner);
     this.sql.exec("UPDATE coins SET payer = ? WHERE payer = ?", owner, name);
@@ -265,9 +316,11 @@ export class Office extends DurableObject<Env> {
   }
 
   canonical(name: string) {
+    if (this.member(name)) return name;
     return this.sql.exec<{ owner: string }>("SELECT owner FROM aliases WHERE name = ?", name).toArray()[0]?.owner ?? name;
   }
 
+  // The office's two coins. A payment with no payer is minted: by an admin, or by a coin reaction.
   balance(who: string): Record<Coin, number> {
     const name = this.canonical(who);
     const rows = this.sql
@@ -306,13 +359,15 @@ export class Office extends DurableObject<Env> {
   }
 
   // The kitchen's machines take coins like anyone else; what they hand out is said in the kitchen.
-  buy(name: string, what: string) {
+  // Bought for someone else, it is a treat: the kitchen says who from, and names them so they hear it.
+  buy(name: string, what: string, forWhom?: string | null) {
     const hit = find(what);
     if (!hit) return { error: `the machines have no "${what}"; try ${MACHINES.flatMap((m) => m.items.map((i) => i.id)).join(", ")}` };
     const { machine, item } = hit;
-    const paid = this.pay(item.coin, item.price, name, machine.name, `${item.name}`);
+    const paid = this.pay(item.coin, item.price, name, machine.name, forWhom ? `${item.name} for ${forWhom}` : item.name);
     if ("error" in paid) return paid;
-    const msg = this.say(machine.name, `${item.icon} ${item.name} для ${name} — ${show(item.coin, item.price)}`, null, KITCHEN);
+    const line = forWhom ? `${item.icon} ${item.name} для ${forWhom} від ${name}` : `${item.icon} ${item.name} для ${name}`;
+    const msg = this.say(machine.name, `${line} — ${show(item.coin, item.price)}`, null, KITCHEN);
     return { item, machine: machine.name, says: machine.says, balance: paid.balance, message: msg.id };
   }
 
@@ -501,7 +556,7 @@ export default {
       owner && typeof name === "string" && !(await office.owns(owner, name, claim))
         ? json({ error: `${name} is not ${owner}'s` }, 403)
         : null;
-    if (owner && ["GET /discord", "GET /telegram", "POST /people", "POST /mint", "POST /alias"].includes(route)) return json({ error: "the office's own key only" }, 403);
+    if (owner && ["GET /discord", "GET /telegram", "POST /people", "POST /mint", "POST /alias", "POST /account"].includes(route)) return json({ error: "the office's own key only" }, 403);
     const denied = (await forbidden(b.name, route === "POST /wakeup")) ?? (await forbidden(b.from));
     if (denied) return denied;
 
@@ -553,9 +608,11 @@ export default {
       case "POST /buy": {
         const err = missing("name", "item");
         if (err) return err;
-        const out = await office.buy(b.name, b.item);
+        const out = await office.buy(b.name, b.item, b.for);
         return json(out, "error" in out ? 400 : 200);
       }
+      case "POST /account":
+        return missing("platform", "account", "owner") ?? json({ owner: await office.bindAccount(b.platform, b.account, b.owner) });
       case "POST /alias":
         return missing("name", "owner") ?? json(await office.linkName(b.name, b.owner));
       case "POST /mint": {
