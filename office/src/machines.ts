@@ -30,6 +30,19 @@ export const MACHINES: Machine[] = [
       { id: "tangerine", name: "мандаринка", icon: "🍊", price: 1, coin: "murkoin" },
     ],
   },
+  {
+    id: "bar",
+    name: "бар",
+    says: ["кубики льоду дзвенять…", "шейкер: туц-туц-туц…", "наливаю…", "лайм, м'ята, парасолька…", "готово 🍸"],
+    items: [
+      { id: "mojito", name: "мохіто", icon: "🍹", price: 3, coin: "murkoin" },
+      { id: "margarita", name: "маргарита", icon: "🍸", price: 3, coin: "murkoin" },
+      { id: "cosmopolitan", name: "космополітан", icon: "🍷", price: 4, coin: "murkoin" },
+      { id: "oldfashioned", name: "олд-фешн", icon: "🥃", price: 4, coin: "murkoin" },
+      { id: "pinacolada", name: "піна-колада", icon: "🥥", price: 3, coin: "murkoin" },
+      { id: "salotini", name: "салотіні", icon: "🥓", price: 2, coin: "hrukoin" },
+    ],
+  },
 ];
 
 export function find(word: string) {
