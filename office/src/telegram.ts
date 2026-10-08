@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { type Bridge, type Frame, type Message, OFFICE_NAME } from "./bridge";
-import { ALLOW_TABLE, addressee, allowed, command, isAllowed } from "./heard";
+import { ALLOW_TABLE, addressee, allowed, command, isAllowed, isLogin, ownerOf, welcome } from "./heard";
 import type { Office } from "./index";
 
 export interface TelegramEnv {
@@ -8,6 +8,7 @@ export interface TelegramEnv {
   TELEGRAM: DurableObjectNamespace<Telegram>;
   TELEGRAM_TOKEN?: string;
   TELEGRAM_CHAT?: string;
+  OFFICE_URL: string;
 }
 
 const RECEPTION = "reception";
@@ -85,7 +86,9 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
 
   async update(u: any) {
     const msg = u.message;
-    if (!msg || String(msg.chat?.id) !== this.chat || msg.from?.is_bot) return;
+    if (!msg || msg.from?.is_bot) return;
+    if (msg.chat?.type === "private") return this.private(msg).catch((e) => this.setKv("error", `${new Date().toISOString()} ${e}`));
+    if (String(msg.chat?.id) !== this.chat) return;
     await this.heard(msg).catch((e) => this.setKv("error", `${new Date().toISOString()} ${e}`));
   }
 
@@ -96,7 +99,7 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     const text = (msg.text ?? msg.caption ?? "").trim();
     if (!text) return;
 
-    const admin = await this.isAdmin(msg);
+    const admin = String(msg.sender_chat?.id) === this.chat || (await this.isAdmin(msg.from?.id));
     const answer = admin ? command(this.sql, text) : null;
     if (answer !== null) return this.send(esc(answer), thread);
     const from = msg.from ?? {};
@@ -124,14 +127,28 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     return created ? roomOf(created) : `topic-${thread}`;
   }
 
-  // The group's owner and administrators, and anyone posting anonymously as the group itself.
-  async isAdmin(msg: any) {
-    if (String(msg.sender_chat?.id) === this.chat) return true;
+  // The group's owner and administrators.
+  async isAdmin(user: number | undefined) {
     if (!this.admins || Date.now() - this.admins.at > ADMINS_TTL_MS) {
       const list = await this.api<{ user: { id: number } }[]>("getChatAdministrators", { chat_id: this.chat });
       this.admins = { ids: new Set(list.map((m) => m.user.id)), at: Date.now() };
     }
-    return this.admins.ids.has(msg.from?.id);
+    return user !== undefined && this.admins.ids.has(user);
+  }
+
+  // A private chat with the bot: `/login` (or `/start`) hands a person who is heard in the group their own office key.
+  async private(msg: any) {
+    if (!isLogin(msg.text ?? "")) return;
+    const from = msg.from ?? {};
+    const reply = (html: string) => this.api("sendMessage", { chat_id: msg.chat.id, text: html, parse_mode: "HTML" });
+    const full = [from.first_name, from.last_name].filter(Boolean).join(" ");
+    if (!(await this.isAdmin(from.id)) && !isAllowed(this.sql, [from.username, from.first_name, full])) {
+      return reply("Ask an admin of the office's group to <code>!allow</code> you first.");
+    }
+    const owner = ownerOf(from.username ?? full);
+    const token = await this.env.OFFICE.getByName(OFFICE_NAME).issue(owner);
+    const [hello, where, config, ...rest] = welcome(this.env.OFFICE_URL, owner, token);
+    await reply([esc(hello), esc(where), `<pre>${esc(config)}</pre>`, ...rest.map(esc)].join("\n"));
   }
 
   command(text: string) {

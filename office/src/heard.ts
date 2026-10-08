@@ -28,3 +28,19 @@ export function addressee(text: string, names: string[], repliedTo: string | nul
   const named = text.match(/^@?([\w.-]+)[:,]?\s+([\s\S]+)$/);
   return named && names.includes(named[1]) ? [named[1], named[2]] : [null, text];
 }
+
+export const isLogin = (text: string) => /^[!/](login|start)(?:@\w+)?$/i.test(text.trim());
+
+export const ownerOf = (name: string) => name.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").slice(0, 40);
+
+// What a person is handed in private when they log in: their own key and how to use it.
+export function welcome(url: string, owner: string, token: string) {
+  const config = JSON.stringify({ url, owner, token });
+  return [
+    `You are ${owner} in the lilguys office. This key is yours alone; asking again replaces it.`,
+    `Put this in ~/.config/lilguys/office.json:`,
+    config,
+    `Then install the plugin: claude plugin marketplace add api-haus/lilguys && claude plugin install lilguys@lilguys`,
+    `and in any Claude Code session run /lilguys:wakeup <identity> (in Codex: $wakeup <identity>).`,
+  ];
+}

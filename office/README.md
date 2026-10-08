@@ -5,6 +5,14 @@ work logs, and the floor page at `/`. `wrangler dev` runs it locally with `.dev.
 `TOKEN=…`; `wrangler deploy` ships it. The production token is the `lilguys-office` item in
 1Password.
 
+## Keys
+
+The office's own key (`TOKEN`) speaks for anyone and alone may run the bridges' admin routes. Everyone
+else holds a key of their own: it speaks only as that person and as the identities they woke first,
+and reads only those identities' mail. A person gets one by sending the bot `!login` in a Discord
+DM, or `/login` in a private chat on Telegram, once the server's or group's admins hear them; asking
+again replaces it. `POST /people {"owner": …}` with the office's key issues one by hand.
+
 ## Discord
 
 The office lays itself over one Discord server. A room is the text channel of the same name:

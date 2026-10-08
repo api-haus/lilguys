@@ -8,6 +8,7 @@ export { Discord, Telegram };
 
 interface Env extends DiscordEnv, TelegramEnv {
   TOKEN: string;
+  OFFICE_URL: string;
 }
 
 type Member = {
@@ -57,12 +58,33 @@ export class Office extends DurableObject<Env> {
         CREATE TABLE IF NOT EXISTS log (
           id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, name TEXT NOT NULL,
           kind TEXT NOT NULL CHECK (kind IN ('entry','pending','priority')), text TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS people (owner TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, issued INTEGER NOT NULL);
       `);
       // Databases created before the mailbox.
       try { this.sql.exec("ALTER TABLE messages ADD COLUMN brief TEXT NOT NULL DEFAULT ''"); } catch {}
       try { this.sql.exec("ALTER TABLE members DROP COLUMN cursor"); } catch {}
       this.sql.exec(`UPDATE messages SET brief = substr(text, 1, ${BRIEF_CHARS}) WHERE brief = ''`);
     });
+  }
+
+  // A person's own key: a fresh one revokes the last. Only its hash is kept.
+  async issue(owner: string) {
+    const token = [...crypto.getRandomValues(new Uint8Array(24))].map((b) => b.toString(16).padStart(2, "0")).join("");
+    this.sql.exec(
+      "INSERT INTO people (owner, hash, issued) VALUES (?, ?, ?) ON CONFLICT(owner) DO UPDATE SET hash = excluded.hash, issued = excluded.issued",
+      owner, await sha256(token), Date.now(),
+    );
+    return token;
+  }
+
+  async whois(token: string) {
+    return this.sql.exec<{ owner: string }>("SELECT owner FROM people WHERE hash = ?", await sha256(token)).toArray()[0]?.owner ?? null;
+  }
+
+  // An identity belongs to the person who first woke it; the person's own name is theirs to speak as.
+  owns(owner: string, name: string, claim = false) {
+    const m = this.member(name);
+    return m ? m.owner === owner : claim || name === owner;
   }
 
   member(name: string): Member | undefined {
@@ -235,20 +257,32 @@ export class Office extends DurableObject<Env> {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
+    server.serializeAttachment({ owner: request.headers.get("x-office-owner") });
     server.send(JSON.stringify({ v: 1, t: "snapshot", ...this.snapshot() }));
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  // A person in the floor view talks the same way an agent does, and may give the bridges commands; agents may not.
-  async webSocketMessage(_ws: WebSocket, raw: string | ArrayBuffer) {
+  // A person in the floor view talks the same way an agent does. Holding the office's own key, they
+  // may also give the bridges commands; agents may not.
+  async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
     if (typeof raw !== "string") return;
     const f = JSON.parse(raw);
     if (f.t !== "say" || typeof f.from !== "string" || typeof f.text !== "string") return;
+    const { owner } = ws.deserializeAttachment() as { owner: string | null };
+    if (owner) {
+      if (this.owns(owner, f.from)) this.say(f.from, f.text, f.to, f.room);
+      return;
+    }
     const answers = await Promise.all(this.bridges().map(async ([name, bridge]) => [name, await bridge.command(f.text.trim())] as const));
     const said = answers.filter(([, a]) => a !== null);
     if (said.length) for (const [name, a] of said) this.say("office", `${name}: ${a}`, null, KITCHEN);
     else this.say(f.from, f.text, f.to, f.room);
   }
+}
+
+export async function sha256(text: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 const json = (body: unknown, status = 200) => Response.json(body === undefined ? { ok: true } : body, { status });
@@ -272,12 +306,16 @@ export default {
       return json(undefined);
     }
     const token = request.headers.get("authorization")?.replace(/^Bearer /, "") ?? url.searchParams.get("token");
-    if (token !== env.TOKEN) return json({ error: "unauthorized" }, 401);
-
     const office = env.OFFICE.getByName(OFFICE_NAME);
+    // The office's own key speaks for anyone; a person's key only for that person and the identities they woke.
+    const owner = token === env.TOKEN ? null : token ? await office.whois(token) : null;
+    if (token !== env.TOKEN && !owner) return json({ error: "unauthorized" }, 401);
+
     if (url.pathname === "/ws") {
       if (request.headers.get("upgrade") !== "websocket") return json({ error: "expected websocket" }, 426);
-      return office.fetch(request);
+      const headers = new Headers(request.headers);
+      if (owner) headers.set("x-office-owner", owner);
+      return office.fetch(new Request(request, { headers }));
     }
     const b: any = request.method === "POST" ? await request.json() : Object.fromEntries(url.searchParams);
     const need = (...keys: string[]) => keys.filter((k) => typeof b[k] !== "string" || !b[k]);
@@ -286,9 +324,20 @@ export default {
       return m.length ? json({ error: `missing ${m.join(", ")}` }, 400) : null;
     };
 
-    switch (`${request.method} ${url.pathname}`) {
+    const route = `${request.method} ${url.pathname}`;
+    const forbidden = async (name: unknown, claim = false) =>
+      owner && typeof name === "string" && !(await office.owns(owner, name, claim))
+        ? json({ error: `${name} is not ${owner}'s` }, 403)
+        : null;
+    if (owner && ["GET /discord", "GET /telegram", "POST /people"].includes(route)) return json({ error: "the office's own key only" }, 403);
+    const denied = (await forbidden(b.name, route === "POST /wakeup")) ?? (await forbidden(b.from));
+    if (denied) return denied;
+
+    switch (route) {
+      case "POST /people":
+        return missing("owner") ?? json({ owner: b.owner, token: await office.issue(b.owner) });
       case "POST /wakeup":
-        return missing("name", "owner", "harness") ?? json(await office.wakeup(b.name, b.owner, b.harness, b.room));
+        return missing("name", "harness") ?? json(await office.wakeup(b.name, owner ?? b.owner ?? "someone", b.harness, b.room));
       case "POST /say": {
         const err = missing("from", "text");
         if (err) return err;

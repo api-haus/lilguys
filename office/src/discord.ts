@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { type Bridge, type Frame, type Message, OFFICE_NAME } from "./bridge";
-import { ALLOW_TABLE, addressee, allowed, command, isAllowed } from "./heard";
+import { ALLOW_TABLE, addressee, allowed, command, isAllowed, isLogin, ownerOf, welcome } from "./heard";
 import type { Office } from "./index";
 
 export interface DiscordEnv {
@@ -8,11 +8,12 @@ export interface DiscordEnv {
   DISCORD: DurableObjectNamespace<Discord>;
   DISCORD_TOKEN?: string;
   DISCORD_GUILD?: string;
+  OFFICE_URL: string;
 }
 
 const API = "https://discord.com/api/v10";
 const GATEWAY = "https://gateway.discord.gg/?v=10&encoding=json";
-const INTENTS = (1 << 0) | (1 << 9) | (1 << 15); // GUILDS, GUILD_MESSAGES, MESSAGE_CONTENT
+const INTENTS = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15); // GUILDS, GUILD_MESSAGES, DIRECT_MESSAGES, MESSAGE_CONTENT
 const ADMINISTRATOR = 1n << 3n;
 const WATCHDOG_MS = 60_000;
 const DISCORD_LIMIT = 2000;
@@ -76,8 +77,15 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
   // Called by the alarm, the cron and every relay. Connects if not connected; the alarm keeps it so.
   async ensure() {
     if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + WATCHDOG_MS);
+    if (this.ws && this.kv("intents") !== String(INTENTS)) {
+      const old = this.ws;
+      if (this.beat) clearInterval(this.beat);
+      this.ws = this.beat = null;
+      old.close(4000, "intents changed");
+    }
     if (this.ws) return;
-    const resume = this.kv("session") && this.kv("resume_url");
+    // A resumed session keeps the intents it was identified with.
+    const resume = this.kv("session") && this.kv("resume_url") && this.kv("intents") === String(INTENTS);
     // Workers open a WebSocket through fetch, which takes https:// where Discord hands out wss://.
     const url = resume ? `${this.kv("resume_url")!.replace(/^wss:/, "https:")}/?v=10&encoding=json` : GATEWAY;
     const res = await fetch(url, { headers: { upgrade: "websocket" } });
@@ -116,7 +124,10 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
       case 10:
         this.beat = setInterval(() => send(1, seq()), p.d.heartbeat_interval);
         if (resuming) send(6, { token: this.env.DISCORD_TOKEN, session_id: this.kv("session"), seq: seq() });
-        else send(2, { token: this.env.DISCORD_TOKEN, intents: INTENTS, properties: { os: "linux", browser: "lilguys", device: "lilguys" } });
+        else {
+          this.setKv("intents", String(INTENTS));
+          send(2, { token: this.env.DISCORD_TOKEN, intents: INTENTS, properties: { os: "linux", browser: "lilguys", device: "lilguys" } });
+        }
         return;
       case 1:
         return send(1, seq());
@@ -132,6 +143,8 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
           this.setKv("me", p.d.user.id);
         } else if (p.t === "MESSAGE_CREATE" && p.d.guild_id === this.guild) {
           await this.heard(p.d).catch((e) => this.setKv("error", `${new Date().toISOString()} ${e}`));
+        } else if (p.t === "MESSAGE_CREATE" && !p.d.guild_id && p.d.author?.id !== this.kv("me")) {
+          await this.private(p.d).catch((e) => this.setKv("error", `${new Date().toISOString()} ${e}`));
         } else if (p.t?.startsWith("CHANNEL_")) {
           this.channels = null;
         } else if (p.t === "GUILD_UPDATE" || p.t?.startsWith("GUILD_ROLE_")) {
@@ -156,13 +169,13 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
     if (!text) return;
     const channel = (await this.channelMap()).get(d.channel_id);
     if (!channel) return;
-    const admin = await this.isAdmin(d);
+    const admin = await this.isAdmin(d.author.id, d.member?.roles ?? []);
     const answer = admin ? command(this.sql, text) : null;
     if (answer !== null) {
       await this.rest("POST", `/channels/${channel.id}/messages`, { content: answer, allowed_mentions: { parse: [] } });
       return;
     }
-    if (!admin && !isAllowed(this.sql, [d.author.username, d.author.global_name, d.member?.nick])) return;
+    if (!admin && !isAllowed(this.sql, [d.author.username, d.author.global_name, d.member?.nick, `<@${d.author.id}>`])) return;
     const office = this.env.OFFICE.getByName(OFFICE_NAME);
     const names = await office.memberNames();
     const sender = d.member?.nick ?? d.author.global_name ?? d.author.username;
@@ -175,14 +188,27 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
 
   // ---- who the office listens to: server admins, and the people they allow ----
 
-  async isAdmin(d: any) {
+  async isAdmin(user: string, memberRoles: string[]) {
     if (!this.admins) {
       const g = await this.rest<Guild>("GET", `/guilds/${this.guild}`);
       const roles = g.roles.filter((r) => (BigInt(r.permissions) & ADMINISTRATOR) !== 0n).map((r) => r.id);
       this.admins = { owner: g.owner_id, roles: new Set(roles) };
     }
     const { owner, roles } = this.admins;
-    return d.author.id === owner || roles.has(this.guild) || (d.member?.roles ?? []).some((r: string) => roles.has(r));
+    return user === owner || roles.has(this.guild) || memberRoles.some((r) => roles.has(r));
+  }
+
+  // A direct message: `!login` hands a person who is heard on the server their own office key.
+  async private(d: any) {
+    if (!isLogin(d.content ?? "")) return;
+    const reply = (content: string) => this.rest("POST", `/channels/${d.channel_id}/messages`, { content, allowed_mentions: { parse: [] } });
+    const member = await this.rest<{ nick?: string; roles: string[] }>("GET", `/guilds/${this.guild}/members/${d.author.id}`).catch(() => null);
+    const heard = member && ((await this.isAdmin(d.author.id, member.roles)) || isAllowed(this.sql, [d.author.username, d.author.global_name, member.nick, `<@${d.author.id}>`]));
+    if (!heard) return reply("Ask an admin of the office's server to `!allow` you first.");
+    const owner = ownerOf(d.author.username);
+    const token = await this.env.OFFICE.getByName(OFFICE_NAME).issue(owner);
+    const [hello, where, config, ...rest] = welcome(this.env.OFFICE_URL, owner, token);
+    await reply([hello, where, "```json\n" + config + "\n```", ...rest].join("\n"));
   }
 
   command(text: string) {
