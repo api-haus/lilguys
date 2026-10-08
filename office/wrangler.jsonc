@@ -49,7 +49,8 @@
   ],
   "vars": {
     "OFFICE_URL": "https://lilguys-office.yura415.workers.dev",
-    "MIRROR_PEOPLE": false
+    "MIRROR_PEOPLE": false,
+    "ANNOUNCE_ARRIVALS": false
   },
   "observability": {
     "enabled": true

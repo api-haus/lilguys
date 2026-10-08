@@ -13,6 +13,7 @@ interface Env extends DiscordEnv, TelegramEnv {
   TOKEN: string;
   OFFICE_URL: string;
   MIRROR_PEOPLE: boolean;
+  ANNOUNCE_ARRIVALS: boolean;
 }
 
 type Member = {
@@ -69,6 +70,7 @@ export class Office extends DurableObject<Env> {
         CREATE TABLE IF NOT EXISTS coins (
           id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, coin TEXT NOT NULL, amount INTEGER NOT NULL CHECK (amount > 0),
           payer TEXT, payee TEXT NOT NULL, why TEXT NOT NULL DEFAULT '');
+        CREATE TABLE IF NOT EXISTS aliases (name TEXT PRIMARY KEY, owner TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS owners (owner TEXT PRIMARY KEY, icon TEXT NOT NULL UNIQUE);
         CREATE TABLE IF NOT EXISTS people (owner TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, issued INTEGER NOT NULL);
       `);
@@ -164,9 +166,11 @@ export class Office extends DurableObject<Env> {
     return all;
   }
 
-  // What a person types in one messenger is mirrored into the others only when MIRROR_PEOPLE is on.
+  // What a person types in one messenger is mirrored into the others only when MIRROR_PEOPLE is on,
+  // and arrivals, departures and lock-ins are announced in them only when ANNOUNCE_ARRIVALS is.
   relay(frame: Frame, origin?: string | null) {
     if (origin && !this.env.MIRROR_PEOPLE) return;
+    if ((frame.t === "enter" || frame.t === "leave" || frame.t === "move") && !this.env.ANNOUNCE_ARRIVALS) return;
     for (const [name, bridge] of this.bridges()) {
       if (name !== origin) this.ctx.waitUntil(bridge.relay(frame).catch((e) => console.error(`${name} relay: ${e}`)));
     }
@@ -210,7 +214,7 @@ export class Office extends DurableObject<Env> {
   mail(name: string, state: Mail["state"], limit = -1): Mail[] {
     return this.sql
       .exec<Mail>(
-        "SELECT m.*, mail.state, mail.touched, mail.reminded FROM mail JOIN messages m ON m.id = mail.message WHERE mail.name = ? AND mail.state = ? ORDER BY m.id LIMIT ?",
+        "SELECT m.*, mail.state, mail.touched, mail.reminded, a.owner AS via FROM mail JOIN messages m ON m.id = mail.message LEFT JOIN aliases a ON a.name = m.sender WHERE mail.name = ? AND mail.state = ? ORDER BY m.id LIMIT ?",
         name, state, limit,
       )
       .toArray();
@@ -245,11 +249,26 @@ export class Office extends DurableObject<Env> {
     const hit = this.sql.exec("UPDATE mail SET touched = 1 WHERE name = ? AND message = ? RETURNING message", name, id).toArray();
     if (!hit.length) return null;
     const reactions = this.sql.exec<{ who: string; emoji: string }>("SELECT who, emoji FROM reactions WHERE message = ? ORDER BY at", id).toArray();
-    return { ...this.sql.exec<Message>("SELECT * FROM messages WHERE id = ?", id).one(), reactions };
+    const m = this.sql.exec<Message>("SELECT * FROM messages WHERE id = ?", id).one();
+    return { ...m, reactions, via: this.canonical(m.sender) === m.sender ? null : this.canonical(m.sender) };
   }
 
   // The office's two coins. A payment with no payer is minted: by an admin, or by a coin reaction.
-  balance(name: string): Record<Coin, number> {
+  // A person's names in the messengers, as the owner they are: their wallet is the owner's, and the
+  // owner's agents know their words for their own user's.
+  linkName(name: string, owner: string) {
+    this.sql.exec("INSERT OR REPLACE INTO aliases (name, owner) VALUES (?, ?)", name, owner);
+    this.sql.exec("UPDATE coins SET payer = ? WHERE payer = ?", owner, name);
+    this.sql.exec("UPDATE coins SET payee = ? WHERE payee = ?", owner, name);
+    return this.sql.exec("SELECT name, owner FROM aliases ORDER BY owner, name").toArray();
+  }
+
+  canonical(name: string) {
+    return this.sql.exec<{ owner: string }>("SELECT owner FROM aliases WHERE name = ?", name).toArray()[0]?.owner ?? name;
+  }
+
+  balance(who: string): Record<Coin, number> {
+    const name = this.canonical(who);
     const rows = this.sql
       .exec<{ coin: Coin; n: number }>(
         "SELECT coin, SUM(CASE WHEN payee = ?1 THEN amount ELSE 0 END) - SUM(CASE WHEN payer = ?1 THEN amount ELSE 0 END) AS n FROM coins WHERE payee = ?1 OR payer = ?1 GROUP BY coin",
@@ -259,14 +278,16 @@ export class Office extends DurableObject<Env> {
     return Object.fromEntries((Object.keys(COINS) as Coin[]).map((c) => [c, rows.find((r) => r.coin === c)?.n ?? 0])) as Record<Coin, number>;
   }
 
-  wallet(name: string) {
+  wallet(who: string) {
+    const name = this.canonical(who);
     const recent = this.sql
       .exec("SELECT at, coin, amount, payer, payee, why FROM coins WHERE payee = ?1 OR payer = ?1 ORDER BY id DESC LIMIT 5", name)
       .toArray();
     return { name, balance: this.balance(name), recent };
   }
 
-  pay(coin: Coin, amount: number, payer: string | null, payee: string, why: string) {
+  pay(coin: Coin, amount: number, from: string | null, to: string, why: string) {
+    const payer = from && this.canonical(from), payee = this.canonical(to);
     if (!COINS[coin] || !Number.isInteger(amount) || amount <= 0) return { error: "an amount is a whole number above zero, of муркоін or хрюкоін" };
     if (payer === payee) return { error: "paying yourself changes nothing" };
     if (payer && this.balance(payer)[coin] < amount) return { error: `${payer} has only ${show(coin, this.balance(payer)[coin])}` };
@@ -301,7 +322,7 @@ export class Office extends DurableObject<Env> {
     if (!m) return;
     const fresh = this.sql.exec("INSERT OR IGNORE INTO reactions (message, who, emoji, at) VALUES (?, ?, ?, ?) RETURNING message", id, who, emoji, Date.now()).toArray();
     const tip = fresh.length && m.sender !== who ? tipOf(emoji) : null;
-    if (tip) this.sql.exec("INSERT INTO coins (at, coin, amount, payer, payee, why) VALUES (?, ?, 1, NULL, ?, ?)", Date.now(), tip, m.sender, `${who}'s reaction to #${id}`);
+    if (tip) this.sql.exec("INSERT INTO coins (at, coin, amount, payer, payee, why) VALUES (?, ?, 1, NULL, ?, ?)", Date.now(), tip, this.canonical(m.sender), `${who}'s reaction to #${id}`);
     const agent = [m.sender, m.recipient].find((n) => n && n !== who && this.member(n));
     if (!fresh.length || !agent) return;
     const text = `reacted ${emoji} to #${id} "${m.brief}"${tip && agent === m.sender ? `, tipping you ${show(tip, 1)}` : ""}${picture ? `\n${picture}` : ""}`;
@@ -479,7 +500,7 @@ export default {
       owner && typeof name === "string" && !(await office.owns(owner, name, claim))
         ? json({ error: `${name} is not ${owner}'s` }, 403)
         : null;
-    if (owner && ["GET /discord", "GET /telegram", "POST /people", "POST /mint"].includes(route)) return json({ error: "the office's own key only" }, 403);
+    if (owner && ["GET /discord", "GET /telegram", "POST /people", "POST /mint", "POST /alias"].includes(route)) return json({ error: "the office's own key only" }, 403);
     const denied = (await forbidden(b.name, route === "POST /wakeup")) ?? (await forbidden(b.from));
     if (denied) return denied;
 
@@ -533,6 +554,8 @@ export default {
         const out = await office.buy(b.name, b.item);
         return json(out, "error" in out ? 400 : 200);
       }
+      case "POST /alias":
+        return missing("name", "owner") ?? json(await office.linkName(b.name, b.owner));
       case "POST /mint": {
         const err = missing("to", "coin");
         if (err) return err;
