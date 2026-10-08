@@ -34,6 +34,8 @@ const KITCHEN = "kitchen";
 
 // What every agent is told once, whatever client or runner it lives in: the office mails it.
 const RECEPTION_ROOM = "reception";
+const ALLOWANCE_MIN = 45_000;
+const ALLOWANCE_MAX = 78_000;
 const HOUSE_VERSION = 1;
 const HOUSE = `House rules of the lilguys office, from reception.
 
@@ -88,6 +90,7 @@ export class Office extends DurableObject<Env> {
         CREATE TABLE IF NOT EXISTS accounts (
           platform TEXT NOT NULL, account TEXT NOT NULL, owner TEXT NOT NULL, at INTEGER NOT NULL,
           PRIMARY KEY (platform, account), UNIQUE (platform, owner));
+        CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS aliases (name TEXT PRIMARY KEY, owner TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS owners (owner TEXT PRIMARY KEY, icon TEXT NOT NULL UNIQUE);
         CREATE TABLE IF NOT EXISTS people (owner TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, issued INTEGER NOT NULL);
@@ -371,6 +374,43 @@ export class Office extends DurableObject<Env> {
     return { item, machine: machine.name, says: machine.says, balance: paid.balance, message: msg.id };
   }
 
+  // Everyone who has spoken in the office in the last month, people and agents, by wallet.
+  residents() {
+    const machines = new Set([...MACHINES.map((m) => m.name), "office", "reception"]);
+    const names = this.sql
+      .exec<{ sender: string }>("SELECT DISTINCT sender FROM messages WHERE at > ?", Date.now() - 30 * 86_400_000)
+      .toArray()
+      .map((r) => this.canonical(r.sender))
+      .filter((n) => !machines.has(n));
+    return [...new Set(names)];
+  }
+
+  // Minted to every resident in one go, announced once in the kitchen rather than in every mailbox.
+  // A fixed amount, or with none a fresh random allowance per coin per resident.
+  handOut(amount: number | null, why: string) {
+    const amounts = () => amount ?? ALLOWANCE_MIN + Math.floor(Math.random() * (ALLOWANCE_MAX - ALLOWANCE_MIN + 1));
+    const got: Record<string, Record<Coin, number>> = {};
+    for (const name of this.residents()) {
+      got[name] = {} as Record<Coin, number>;
+      for (const coin of Object.keys(COINS) as Coin[]) {
+        const n = amounts();
+        this.sql.exec("INSERT INTO coins (at, coin, amount, payer, payee, why) VALUES (?, ?, ?, NULL, ?, ?)", Date.now(), coin, n, name, why);
+        got[name][coin] = n;
+      }
+    }
+    this.say("office", `💰 ${why}: ${Object.entries(got).map(([n, c]) => `${n} +${c.murkoin}🪙 +${c.hrukoin}🐽`).join(", ")}`, null, KITCHEN);
+    return got;
+  }
+
+  // Once per UTC day, each resident gets a slightly random allowance of each coin.
+  allowance() {
+    const today = new Date().toISOString().slice(0, 10);
+    if (this.sql.exec("SELECT 1 FROM settings WHERE k = 'allowance' AND v = ?", today).toArray().length) return null;
+    const got = this.handOut(null, `щоденна видача ${today}`);
+    this.sql.exec("INSERT OR REPLACE INTO settings (k, v) VALUES ('allowance', ?)", today);
+    return got;
+  }
+
   // A reaction in a messenger, kept on the message, and mailed to the agent it concerns: whoever
   // said it, or else whoever it was addressed to. It is not relayed; the messengers show their own.
   react(id: number, who: string, emoji: string, picture: string | null, whoOwner: string | null = null) {
@@ -493,6 +533,7 @@ const json = (body: unknown, status = 200) => Response.json(body === undefined ?
 
 export default {
   async scheduled(_event: ScheduledController, env: Env) {
+    await env.OFFICE.getByName(OFFICE_NAME).allowance();
     if (env.DISCORD_TOKEN && env.DISCORD_GUILD) await env.DISCORD.getByName(env.DISCORD_GUILD).ensure();
   },
 
@@ -556,7 +597,7 @@ export default {
       owner && typeof name === "string" && !(await office.owns(owner, name, claim))
         ? json({ error: `${name} is not ${owner}'s` }, 403)
         : null;
-    if (owner && ["GET /discord", "GET /telegram", "POST /people", "POST /mint", "POST /alias", "POST /account"].includes(route)) return json({ error: "the office's own key only" }, 403);
+    if (owner && ["GET /discord", "GET /telegram", "POST /people", "POST /mint", "POST /alias", "POST /account", "POST /handout"].includes(route)) return json({ error: "the office's own key only" }, 403);
     const denied = (await forbidden(b.name, route === "POST /wakeup")) ?? (await forbidden(b.from));
     if (denied) return denied;
 
@@ -615,6 +656,9 @@ export default {
         return missing("platform", "account", "owner") ?? json({ owner: await office.bindAccount(b.platform, b.account, b.owner) });
       case "POST /alias":
         return missing("name", "owner") ?? json(await office.linkName(b.name, b.owner));
+      case "POST /handout":
+        if (!Number.isInteger(b.amount) || b.amount <= 0) return json({ error: "amount must be a whole number above zero" }, 400);
+        return json(await office.handOut(b.amount, b.why ?? "роздача від офісу"));
       case "POST /mint": {
         const err = missing("to", "coin");
         if (err) return err;
