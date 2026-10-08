@@ -1,4 +1,5 @@
 import type { Office } from "./index";
+import { MACHINES } from "./machines";
 
 export const COINS = {
   murkoin: { name: "муркоін", icon: "🪙", aliases: ["murkoin", "murk", "муркоін", "муркоин", "мурк", "🪙"] },
@@ -15,12 +16,17 @@ export const show = (coin: Coin, amount: number) => `${amount} ${COINS[coin].nam
 // A reaction with a coin's emoji tips the message's author one of it.
 export const tipOf = (emoji: string): Coin | null => (Object.keys(COINS) as Coin[]).find((c) => emoji.includes(COINS[c].icon)) ?? null;
 
-// `!coins [name]`, `!give <name> <amount> <coin> [why]`, and for admins `!mint <name> <amount> <coin> [why]`.
+// `!coins [name]`, `!give <name> <amount> <coin> [why]`, `!menu`, `!buy <item>`, and for admins `!mint <name> <amount> <coin> [why]`.
 export async function coinCommand(office: DurableObjectStub<Office>, who: string, text: string, admin: boolean): Promise<string | null> {
-  const m = text.match(/^[!/](coins|give|mint)(?:@\w+)?(?:\s+([\s\S]+))?$/i);
+  const m = text.match(/^[!/](coins|give|mint|menu|buy)(?:@\w+)?(?:\s+([\s\S]+))?$/i);
   if (!m) return null;
   const verb = m[1].toLowerCase();
   const args = (m[2] ?? "").trim();
+  if (verb === "menu") return MACHINES.map((mc) => `${mc.name}: ${mc.items.map((i) => `${i.icon} ${i.name} ${show(i.coin, i.price)}`).join(" · ")}`).join("\n");
+  if (verb === "buy") {
+    const out = await office.buy(who, args);
+    return "error" in out ? out.error : `${out.says.at(-1)}`;
+  }
   if (verb === "coins") return walletLine(await office.wallet(args.replace(/^@/, "") || who));
   const p = args.match(/^@?(\S+)\s+(\d+)\s+(\S+)(?:\s+([\s\S]+))?$/);
   const coin = p && coinOf(p[3]);

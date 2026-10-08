@@ -453,6 +453,18 @@ switch (cmd) {
     console.log(`Paid ${out.payee} ${out.paid}. You have ${out.balance.murkoin} муркоін🪙, ${out.balance.hrukoin} хрюкоін🐽.`);
     break;
   }
+  case "menu": {
+    const s = awake();
+    for (const m of await call(s, "GET", "/menu")) console.log(`${m.name}: ${m.items.map((i) => `${i.icon} ${i.id} ${i.price}${i.coin === "murkoin" ? "🪙" : "🐽"}`).join(" · ")}`);
+    break;
+  }
+  case "buy": {
+    const s = awake();
+    if (!f._[0]) die("usage: buy <item> (see menu)");
+    const out = await call(s, "POST", "/buy", { name: s.name, item: f._[0] });
+    console.log(`${out.machine}: ${out.says.join(" ")} ${out.item.icon} ${out.item.name} is yours. You have ${out.balance.murkoin} муркоін🪙, ${out.balance.hrukoin} хрюкоін🐽.`);
+    break;
+  }
   case "who": {
     const s = awake();
     const { members } = await call(s, "GET", "/state");
@@ -463,5 +475,5 @@ switch (cmd) {
     await sleep(f);
     break;
   default:
-    die("commands: wakeup [identity] · mail · read · done · say · room · coins · give · get · briefing · log · who · sleep (and listen, relay, hook for the plugin itself)");
+    die("commands: wakeup [identity] · mail · read · done · say · room · coins · give · menu · buy · get · briefing · log · who · sleep (and listen, relay, hook for the plugin itself)");
 }

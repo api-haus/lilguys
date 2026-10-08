@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Office Kitchen</title>
+<style>
+  :root { --bg:#f3efe6; --ink:#2b2a28; --dim:#8a857b; --card:#fffdf8; --line:#e2dccf; --me:#5b8def; --steel:#c9ccd1; --steel-dark:#9aa0a8; --glow:#7cb67f; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#1d1c1a; --ink:#ece7dc; --dim:#8f897d; --card:#272522; --line:#3a3732; --steel:#4a4e55; --steel-dark:#33363b; } }
+  :root[data-theme="dark"] { --bg:#1d1c1a; --ink:#ece7dc; --dim:#8f897d; --card:#272522; --line:#3a3732; --steel:#4a4e55; --steel-dark:#33363b; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.4 system-ui, sans-serif; }
+  header { padding:14px 16px; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:18px; }
+  header a { color:var(--dim); font-size:13px; }
+  .wallet { margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .wallet b { font-variant-numeric: tabular-nums; }
+  input { font:inherit; padding:8px 10px; border-radius:10px; border:2px solid var(--line); background:var(--card); color:var(--ink); width:130px; }
+  main { display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:16px; padding:0 16px 16px; }
+  .machine { background:var(--steel); border-radius:18px; padding:14px; border:3px solid var(--steel-dark); }
+  .machine h2 { margin:0 0 10px; font-size:14px; text-transform:uppercase; letter-spacing:.08em; }
+  .screen { background:#14261a; color:#9be59f; font:13px/1.4 ui-monospace, monospace; border-radius:8px; padding:8px 10px; min-height:44px; margin-bottom:12px; }
+  .items { display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; }
+  .item { background:var(--card); color:var(--ink); border:2px solid var(--line); border-radius:12px; padding:8px 4px; text-align:center; cursor:pointer; font:inherit; }
+  .item:hover { border-color:var(--me); }
+  .item:disabled { opacity:.5; cursor:wait; }
+  .item .icon { font-size:28px; display:block; }
+  .item small { color:var(--dim); display:block; font-size:12px; }
+  .tray { margin-top:12px; height:64px; border-radius:10px; background:var(--steel-dark); display:flex; align-items:center; justify-content:center; font-size:38px; overflow:hidden; }
+  .drop { animation: drop .6s ease-in; }
+  @keyframes drop { from { transform: translateY(-60px); opacity:0; } to { transform:none; opacity:1; } }
+  .steam { animation: steam 1.4s ease-in-out infinite; }
+  @keyframes steam { 50% { transform: translateY(-4px) rotate(-3deg); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>office kitchen</h1><a href="/">← floor</a>
+  <div class="wallet">
+    <input id="who" placeholder="your name" autocomplete="off">
+    <span id="balance">—</span>
+  </div>
+</header>
+<main id="machines"></main>
+<script>
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+const hash = new URLSearchParams(location.hash.slice(1));
+if (hash.get("token")) { store.set("token", hash.get("token")); history.replaceState(null, "", location.pathname); }
+const token = store.get("token");
+const $ = (id) => document.getElementById(id);
+const api = (route, body) => fetch(route, {
+  method: body ? "POST" : "GET",
+  headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+  body: body && JSON.stringify(body),
+}).then((r) => r.json());
+const COIN = { murkoin: "🪙", hrukoin: "🐽" };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+$("who").value = store.get("who") || "";
+$("who").onchange = () => { store.set("who", $("who").value.trim()); balance(); };
+
+async function balance() {
+  const who = $("who").value.trim();
+  if (!who || !token) { $("balance").textContent = token ? "who's buying?" : "open with #token=… once"; return; }
+  const w = await api(`/coins?name=${encodeURIComponent(who)}`);
+  $("balance").innerHTML = w.error ? w.error : `<b>${w.balance.murkoin}</b> 🪙 · <b>${w.balance.hrukoin}</b> 🐽`;
+}
+
+function render(machines) {
+  for (const m of machines) {
+    const el = document.createElement("section");
+    el.className = "machine";
+    el.innerHTML = `<h2>${m.name}</h2><div class="screen">вставте монетку</div><div class="items"></div><div class="tray"></div>`;
+    const [screen, items, tray] = [el.querySelector(".screen"), el.querySelector(".items"), el.querySelector(".tray")];
+    for (const it of m.items) {
+      const b = document.createElement("button");
+      b.className = "item";
+      b.innerHTML = `<span class="icon">${it.icon}</span>${it.name}<small>${it.price} ${COIN[it.coin]}</small>`;
+      b.onclick = async () => {
+        const who = $("who").value.trim();
+        if (!who) { $("who").focus(); return; }
+        items.querySelectorAll("button").forEach((x) => x.disabled = true);
+        tray.textContent = "";
+        const out = await api("/buy", { name: who, item: it.id });
+        if (out.error) screen.textContent = out.error;
+        else {
+          for (const line of out.says) { screen.textContent = line; await sleep(700); }
+          tray.innerHTML = `<span class="drop ${m.id === "coffee" ? "steam" : ""}">${it.icon}</span>`;
+          screen.textContent = `${it.name} для ${who}. смачного`;
+          balance();
+        }
+        items.querySelectorAll("button").forEach((x) => x.disabled = false);
+      };
+      items.append(b);
+    }
+    $("machines").append(el);
+  }
+}
+
+if (token) api("/menu").then(render);
+balance();
+</script>
+</body>
+</html>

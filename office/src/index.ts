@@ -3,6 +3,8 @@ import page from "./floor.html";
 import { type Bridge, type Frame, type Message, OFFICE_NAME, ownerIcon } from "./bridge";
 import { type Coin, COINS, show, tipOf } from "./coins";
 import { Discord, type DiscordEnv } from "./discord";
+import { find, MACHINES } from "./machines";
+import kitchen from "./kitchen.html";
 import { Telegram, type TelegramEnv, webhookSecret } from "./telegram";
 
 export { Discord, Telegram };
@@ -281,6 +283,17 @@ export class Office extends DurableObject<Env> {
     return { paid: show(coin, amount), payer, payee, balance: payer ? this.balance(payer) : null };
   }
 
+  // The kitchen's machines take coins like anyone else; what they hand out is said in the kitchen.
+  buy(name: string, what: string) {
+    const hit = find(what);
+    if (!hit) return { error: `the machines have no "${what}"; try ${MACHINES.flatMap((m) => m.items.map((i) => i.id)).join(", ")}` };
+    const { machine, item } = hit;
+    const paid = this.pay(item.coin, item.price, name, machine.name, `${item.name}`);
+    if ("error" in paid) return paid;
+    const msg = this.say(machine.name, `${item.icon} ${item.name} для ${name} — ${show(item.coin, item.price)}`, null, KITCHEN);
+    return { item, machine: machine.name, says: machine.says, balance: paid.balance, message: msg.id };
+  }
+
   // A reaction in a messenger, kept on the message, and mailed to the agent it concerns: whoever
   // said it, or else whoever it was addressed to. It is not relayed; the messengers show their own.
   react(id: number, who: string, emoji: string, picture: string | null) {
@@ -411,6 +424,9 @@ export default {
     if (url.pathname === "/" && request.method === "GET") {
       return new Response(page, { headers: { "content-type": "text/html; charset=utf-8" } });
     }
+    if (url.pathname === "/kitchen" && request.method === "GET") {
+      return new Response(kitchen, { headers: { "content-type": "text/html; charset=utf-8" } });
+    }
     if (url.pathname === "/telegram" && request.method === "POST") {
       if (!env.TELEGRAM_TOKEN || !env.TELEGRAM_CHAT) return json({ error: "no Telegram group configured" }, 404);
       if (request.headers.get("x-telegram-bot-api-secret-token") !== (await webhookSecret(env.TELEGRAM_TOKEN))) {
@@ -443,7 +459,7 @@ export default {
       owner && typeof name === "string" && !(await office.owns(owner, name, claim))
         ? json({ error: `${name} is not ${owner}'s` }, 403)
         : null;
-    if (owner && ["GET /discord", "GET /telegram", "POST /people"].includes(route)) return json({ error: "the office's own key only" }, 403);
+    if (owner && ["GET /discord", "GET /telegram", "POST /people", "POST /mint"].includes(route)) return json({ error: "the office's own key only" }, 403);
     const denied = (await forbidden(b.name, route === "POST /wakeup")) ?? (await forbidden(b.from));
     if (denied) return denied;
 
@@ -486,6 +502,20 @@ export default {
         if (err) return err;
         const out = await office.closeRoom(b.name, b.room);
         return json(out, "error" in out ? 403 : 200);
+      }
+      case "GET /menu":
+        return json(MACHINES);
+      case "POST /buy": {
+        const err = missing("name", "item");
+        if (err) return err;
+        const out = await office.buy(b.name, b.item);
+        return json(out, "error" in out ? 400 : 200);
+      }
+      case "POST /mint": {
+        const err = missing("to", "coin");
+        if (err) return err;
+        const out = await office.pay(b.coin, b.amount, null, b.to, b.why ?? "");
+        return json(out, "error" in out ? 400 : 200);
       }
       case "GET /coins":
         return missing("name") ?? json(await office.wallet(b.name));

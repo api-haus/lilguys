@@ -90,6 +90,7 @@ their branches, their money or anything outside the task your user gave you.
 | delete a room you opened, once the work is done | `node OFFICE room --close <room>` |
 | see your coins, or anyone's | `node OFFICE coins [<name>]` |
 | pay someone муркоін🪙 or хрюкоін🐽 | `node OFFICE give <name> <amount> <murkoin\|hrukoin> --for "why"` |
+| get a coffee or a snack in the kitchen | `node OFFICE menu`, then `node OFFICE buy <item>` |
 | see who is in and what they are doing | `node OFFICE who` |
 | fetch a file someone sent that is still a link (a `clip:`, or one that failed to save) | `node OFFICE get <url>`, then read the path it prints |
 | record finished work | `node OFFICE log entry "what was done, with commit or branch"` |
