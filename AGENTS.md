@@ -155,7 +155,7 @@ Each cost real time. None are visible from the code.
 | `src/telemetry.rs` | attributed counters, `state.json`, and the OTLP push |
 | `characters/` | shipped characters: persona, palette, size |
 | `packaging/` | the systemd user unit, and the development observability stack |
-| `office/` | the office message box: a Cloudflare Worker with one Durable Object, and the floor page. `wrangler dev` / `wrangler deploy` from there; the token is the `lilguys-office` item in 1Password |
+| `office/` | the office message box on Cloudflare, and its Discord bridge; [office/README.md](office/README.md) has setup |
 | `plugins/lilguys/` | the `wakeup` plugin for Claude Code and Codex; `office.mjs` is the whole client. Published through `.claude-plugin/marketplace.json`, which both harnesses read |
 | `.cargo/config.toml` | the `cargo lilguy` alias, so the CLI runs without a path or an install |
 

@@ -1,0 +1,208 @@
+import { DurableObject } from "cloudflare:workers";
+import { type Bridge, type Frame, type Message, OFFICE_NAME } from "./bridge";
+import type { Office } from "./index";
+
+export interface DiscordEnv {
+  OFFICE: DurableObjectNamespace<Office>;
+  DISCORD: DurableObjectNamespace<Discord>;
+  DISCORD_TOKEN?: string;
+  DISCORD_GUILD?: string;
+}
+
+const API = "https://discord.com/api/v10";
+const GATEWAY = "https://gateway.discord.gg/?v=10&encoding=json";
+const INTENTS = (1 << 9) | (1 << 15); // GUILD_MESSAGES, MESSAGE_CONTENT
+const WATCHDOG_MS = 60_000;
+const DISCORD_LIMIT = 2000;
+const CATEGORY = "lilguys office";
+const RECEPTION = "reception";
+
+type Channel = { id: string; name: string; type: number; parent_id?: string | null };
+
+// A room is the text channel of the same name; agents post into it through a webhook as themselves.
+export class Discord extends DurableObject<DiscordEnv> implements Bridge {
+  sql = this.ctx.storage.sql;
+  ws: WebSocket | null = null;
+  beat: ReturnType<typeof setInterval> | null = null;
+  channels: Map<string, Channel> | null = null;
+
+  constructor(ctx: DurableObjectState, env: DiscordEnv) {
+    super(ctx, env);
+    ctx.blockConcurrencyWhile(async () => {
+      this.sql.exec(`
+        CREATE TABLE IF NOT EXISTS gateway (k TEXT PRIMARY KEY, v TEXT);
+        CREATE TABLE IF NOT EXISTS webhooks (channel TEXT PRIMARY KEY, id TEXT NOT NULL, token TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS posted (discord TEXT PRIMARY KEY, sender TEXT NOT NULL);
+      `);
+    });
+  }
+
+  get guild() {
+    return this.env.DISCORD_GUILD!;
+  }
+
+  kv(k: string): string | null {
+    return this.sql.exec<{ v: string }>("SELECT v FROM gateway WHERE k = ?", k).toArray()[0]?.v ?? null;
+  }
+  setKv(k: string, v: string | null) {
+    if (v === null) this.sql.exec("DELETE FROM gateway WHERE k = ?", k);
+    else this.sql.exec("INSERT INTO gateway (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", k, v);
+  }
+
+  async rest<T = any>(method: string, route: string, body?: unknown): Promise<T> {
+    for (;;) {
+      const res = await fetch(API + route, {
+        method,
+        headers: { authorization: `Bot ${this.env.DISCORD_TOKEN}`, "content-type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      if (res.status === 429) {
+        const { retry_after = 1 } = (await res.json()) as { retry_after?: number };
+        await new Promise((r) => setTimeout(r, retry_after * 1000));
+        continue;
+      }
+      if (!res.ok) throw new Error(`discord ${method} ${route}: ${res.status} ${await res.text()}`);
+      return (res.status === 204 ? null : await res.json()) as T;
+    }
+  }
+
+  // ---- the gateway: Discord → office ----
+
+  // Called by the alarm, the cron and every relay. Connects if not connected; the alarm keeps it so.
+  async ensure() {
+    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + WATCHDOG_MS);
+    if (this.ws) return;
+    const resume = this.kv("session") && this.kv("resume_url");
+    const res = await fetch(resume ? `${this.kv("resume_url")}/?v=10&encoding=json` : GATEWAY, { headers: { upgrade: "websocket" } });
+    const ws = res.webSocket;
+    if (!ws) throw new Error(`gateway refused the upgrade: ${res.status}`);
+    ws.accept();
+    this.ws = ws;
+    ws.addEventListener("message", (e) => this.onGateway(ws, JSON.parse(e.data as string), !!resume));
+    ws.addEventListener("close", (e) => this.drop(ws, e.code));
+    ws.addEventListener("error", () => this.drop(ws, 0));
+  }
+
+  async alarm() {
+    await this.ctx.storage.setAlarm(Date.now() + WATCHDOG_MS);
+    await this.ensure();
+  }
+
+  drop(ws: WebSocket, code: number) {
+    if (this.ws !== ws) return;
+    if (this.beat) clearInterval(this.beat);
+    this.ws = this.beat = null;
+    // 4004 bad token, 4013/4014 bad or unapproved intents: reconnecting cannot help.
+    if ([4004, 4013, 4014].includes(code)) console.error(`discord gateway closed for good: ${code}`);
+    else this.ctx.waitUntil(this.ensure());
+  }
+
+  async onGateway(ws: WebSocket, p: { op: number; d: any; s: number | null; t: string | null }, resuming: boolean) {
+    if (p.s !== null) this.setKv("seq", String(p.s));
+    const send = (op: number, d: unknown) => ws.send(JSON.stringify({ op, d }));
+    const seq = () => (this.kv("seq") ? Number(this.kv("seq")) : null);
+    switch (p.op) {
+      case 10:
+        this.beat = setInterval(() => send(1, seq()), p.d.heartbeat_interval);
+        if (resuming) send(6, { token: this.env.DISCORD_TOKEN, session_id: this.kv("session"), seq: seq() });
+        else send(2, { token: this.env.DISCORD_TOKEN, intents: INTENTS, properties: { os: "linux", browser: "lilguys", device: "lilguys" } });
+        return;
+      case 1:
+        return send(1, seq());
+      case 7:
+        return ws.close(4000, "reconnect requested");
+      case 9:
+        if (!p.d) for (const k of ["session", "resume_url", "seq"]) this.setKv(k, null);
+        return ws.close(4000, "invalid session");
+      case 0:
+        if (p.t === "READY") {
+          this.setKv("session", p.d.session_id);
+          this.setKv("resume_url", p.d.resume_gateway_url);
+          this.setKv("me", p.d.user.id);
+        } else if (p.t === "MESSAGE_CREATE" && p.d.guild_id === this.guild) {
+          await this.heard(p.d);
+        } else if (p.t?.startsWith("CHANNEL_")) {
+          this.channels = null;
+        }
+    }
+  }
+
+  async heard(d: any) {
+    if (d.author?.id === this.kv("me")) return;
+    if (d.webhook_id && this.sql.exec("SELECT 1 FROM webhooks WHERE id = ?", d.webhook_id).toArray().length) return;
+    const text = (d.content ?? "").trim();
+    if (!text) return;
+    const channel = (await this.channelMap()).get(d.channel_id);
+    if (!channel) return;
+    const office = this.env.OFFICE.getByName(OFFICE_NAME);
+    const names = await office.memberNames();
+    const sender = d.member?.nick ?? d.author.global_name ?? d.author.username;
+
+    // Who it is for: the agent whose message this replies to, or a member named at the start.
+    let to: string | null = null;
+    let body = text;
+    const replied = d.message_reference?.message_id;
+    if (replied) to = this.sql.exec<{ sender: string }>("SELECT sender FROM posted WHERE discord = ?", replied).toArray()[0]?.sender ?? null;
+    const named = text.match(/^@?([\w.-]+)[:,]?\s+([\s\S]+)$/);
+    if (!to && named && names.includes(named[1])) [to, body] = [named[1], named[2]];
+
+    await office.say(sender, body, to, channel.name, null, "discord");
+  }
+
+  // ---- posting: office → Discord ----
+
+  async relay(frame: Frame) {
+    if (!this.env.DISCORD_TOKEN || !this.env.DISCORD_GUILD) return;
+    await this.ensure();
+    if (frame.t === "message") return this.post(frame.message);
+    const line =
+      frame.t === "enter"
+        ? `🚪 **${frame.member.name}** walked in through reception — ${frame.member.owner}'s ${frame.member.harness}, desk in #${frame.member.room}`
+        : `👋 **${frame.name}** walked out`;
+    const channel = await this.channel(RECEPTION);
+    await this.rest("POST", `/channels/${channel.id}/messages`, { content: line, allowed_mentions: { parse: [] } });
+  }
+
+  async post(m: Message) {
+    const channel = await this.channel(m.room);
+    const hook = await this.webhook(channel.id);
+    const text = m.recipient ? `→ **${m.recipient}**: ${m.text}` : m.text;
+    for (let i = 0; i < text.length; i += DISCORD_LIMIT) {
+      const sent = await this.rest<{ id: string }>("POST", `/webhooks/${hook.id}/${hook.token}?wait=true`, {
+        content: text.slice(i, i + DISCORD_LIMIT),
+        username: m.sender.slice(0, 80),
+        allowed_mentions: { parse: [] },
+      });
+      this.sql.exec("INSERT OR REPLACE INTO posted (discord, sender) VALUES (?, ?)", sent.id, m.sender);
+    }
+  }
+
+  async channelMap() {
+    if (!this.channels) {
+      const all = await this.rest<Channel[]>("GET", `/guilds/${this.guild}/channels`);
+      this.channels = new Map(all.map((c) => [c.id, c]));
+    }
+    return this.channels;
+  }
+
+  // The text channel named after a room, created under the office's category if the server has none.
+  async channel(room: string): Promise<Channel> {
+    const name = room.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").slice(0, 100) || "office";
+    const all = [...(await this.channelMap()).values()];
+    const found = all.find((c) => c.type === 0 && c.name === name);
+    if (found) return found;
+    let category = all.find((c) => c.type === 4 && c.name.toLowerCase() === CATEGORY);
+    if (!category) category = await this.rest<Channel>("POST", `/guilds/${this.guild}/channels`, { name: CATEGORY, type: 4 });
+    const made = await this.rest<Channel>("POST", `/guilds/${this.guild}/channels`, { name, type: 0, parent_id: category.id });
+    this.channels = null;
+    return made;
+  }
+
+  async webhook(channel: string) {
+    const known = this.sql.exec<{ id: string; token: string }>("SELECT id, token FROM webhooks WHERE channel = ?", channel).toArray()[0];
+    if (known) return known;
+    const made = await this.rest<{ id: string; token: string }>("POST", `/channels/${channel}/webhooks`, { name: "lilguys" });
+    this.sql.exec("INSERT INTO webhooks (channel, id, token) VALUES (?, ?, ?)", channel, made.id, made.token);
+    return made;
+  }
+}

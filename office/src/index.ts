@@ -1,8 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
 import page from "./floor.html";
+import { type Bridge, type Frame, type Message, OFFICE_NAME } from "./bridge";
+import { Discord, type DiscordEnv } from "./discord";
 
-interface Env {
-  OFFICE: DurableObjectNamespace<Office>;
+export { Discord };
+
+interface Env extends DiscordEnv {
   TOKEN: string;
 }
 
@@ -17,7 +20,6 @@ type Member = {
   present: number;
 };
 
-type Message = { id: number; at: number; room: string; sender: string; recipient: string | null; brief: string; text: string };
 type Mail = Message & { state: "queued" | "open" | "done"; touched: number; reminded: number };
 
 const KITCHEN = "kitchen";
@@ -86,6 +88,7 @@ export class Office extends DurableObject<Env> {
     );
     const me = this.member(name)!;
     this.broadcast({ t: "enter", member: me });
+    this.relay({ t: "enter", member: me });
     return { briefing: { returning, ...this.briefing(name) }, me, present: this.present() };
   }
 
@@ -109,7 +112,22 @@ export class Office extends DurableObject<Env> {
 
   // A message is mailed to whoever it is addressed to, or, unaddressed, to everybody whose desk is
   // in the room it was said in. Kitchen talk is ambient and mailed to nobody.
-  say(sender: string, text: string, to?: string | null, room?: string | null, brief?: string | null) {
+  // Every messenger the office is laid over, by the name it signs its own messages with.
+  bridges(): [string, Bridge][] {
+    return this.env.DISCORD_TOKEN && this.env.DISCORD_GUILD ? [["discord", this.env.DISCORD.getByName(this.env.DISCORD_GUILD)]] : [];
+  }
+
+  relay(frame: Frame, origin?: string | null) {
+    for (const [name, bridge] of this.bridges()) {
+      if (name !== origin) this.ctx.waitUntil(bridge.relay(frame).catch((e) => console.error(`${name} relay: ${e}`)));
+    }
+  }
+
+  memberNames() {
+    return this.sql.exec<{ name: string }>("SELECT name FROM members").toArray().map((r) => r.name);
+  }
+
+  say(sender: string, text: string, to?: string | null, room?: string | null, brief?: string | null, origin?: string | null) {
     const from = this.member(sender);
     const target = to ? this.member(to) : undefined;
     const where = room ?? target?.room ?? from?.room ?? KITCHEN;
@@ -126,6 +144,7 @@ export class Office extends DurableObject<Env> {
         : this.sql.exec<{ name: string }>("SELECT name FROM members WHERE room = ? AND name != ?", where, sender).toArray().map((r) => r.name);
     for (const name of recipients) this.sql.exec("INSERT INTO mail (name, message) VALUES (?, ?)", name, msg.id);
     this.broadcast({ t: "message", message: msg });
+    this.relay({ t: "message", message: msg }, origin);
     for (const name of recipients) this.broadcast({ t: "mail", name });
     return msg;
   }
@@ -193,6 +212,7 @@ export class Office extends DurableObject<Env> {
     if (priority !== undefined) this.note(name, "priority", priority);
     this.sql.exec("UPDATE members SET present = 0, state = 'left', detail = '', seen = ? WHERE name = ?", Date.now(), name);
     this.broadcast({ t: "leave", name });
+    this.relay({ t: "leave", name });
   }
 
   present() {
@@ -225,6 +245,10 @@ export class Office extends DurableObject<Env> {
 const json = (body: unknown, status = 200) => Response.json(body === undefined ? { ok: true } : body, { status });
 
 export default {
+  async scheduled(_event: ScheduledController, env: Env) {
+    if (env.DISCORD_TOKEN && env.DISCORD_GUILD) await env.DISCORD.getByName(env.DISCORD_GUILD).ensure();
+  },
+
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/" && request.method === "GET") {
@@ -233,7 +257,7 @@ export default {
     const token = request.headers.get("authorization")?.replace(/^Bearer /, "") ?? url.searchParams.get("token");
     if (token !== env.TOKEN) return json({ error: "unauthorized" }, 401);
 
-    const office = env.OFFICE.getByName("main");
+    const office = env.OFFICE.getByName(OFFICE_NAME);
     if (url.pathname === "/ws") {
       if (request.headers.get("upgrade") !== "websocket") return json({ error: "expected websocket" }, 426);
       return office.fetch(request);

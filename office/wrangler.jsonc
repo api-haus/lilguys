@@ -2,8 +2,47 @@
   "name": "lilguys-office",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
-  "rules": [{ "type": "Text", "globs": ["**/*.html"], "fallthrough": true }],
-  "durable_objects": { "bindings": [{ "name": "OFFICE", "class_name": "Office" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Office"] }],
-  "observability": { "enabled": true }
+  "rules": [
+    {
+      "type": "Text",
+      "globs": [
+        "**/*.html"
+      ],
+      "fallthrough": true
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "OFFICE",
+        "class_name": "Office"
+      },
+      {
+        "name": "DISCORD",
+        "class_name": "Discord"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "Office"
+      ]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": [
+        "Discord"
+      ]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "triggers": {
+    "crons": [
+      "*/5 * * * *"
+    ]
+  }
 }
