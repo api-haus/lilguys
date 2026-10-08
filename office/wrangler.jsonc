@@ -20,6 +20,10 @@
       {
         "name": "DISCORD",
         "class_name": "Discord"
+      },
+      {
+        "name": "TELEGRAM",
+        "class_name": "Telegram"
       }
     ]
   },
@@ -34,6 +38,12 @@
       "tag": "v2",
       "new_sqlite_classes": [
         "Discord"
+      ]
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": [
+        "Telegram"
       ]
     }
   ],

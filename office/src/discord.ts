@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { type Bridge, type Frame, type Message, OFFICE_NAME } from "./bridge";
+import { ALLOW_TABLE, addressee, allowed, command, isAllowed } from "./heard";
 import type { Office } from "./index";
 
 export interface DiscordEnv {
@@ -36,7 +37,7 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
         CREATE TABLE IF NOT EXISTS gateway (k TEXT PRIMARY KEY, v TEXT);
         CREATE TABLE IF NOT EXISTS webhooks (channel TEXT PRIMARY KEY, id TEXT NOT NULL, token TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS posted (discord TEXT PRIMARY KEY, sender TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS allowed (name TEXT PRIMARY KEY);
+        ${ALLOW_TABLE};
       `);
     });
   }
@@ -144,7 +145,7 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
       connected: !!this.ws,
       alarm: await this.ctx.storage.getAlarm(),
       ...Object.fromEntries(["session", "seq", "closed", "error", "me"].map((k) => [k, this.kv(k)])),
-      allowed: this.allowed(),
+      allowed: allowed(this.sql),
     };
   }
 
@@ -156,24 +157,19 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
     const channel = (await this.channelMap()).get(d.channel_id);
     if (!channel) return;
     const admin = await this.isAdmin(d);
-    const answer = admin ? this.command(text) : null;
+    const answer = admin ? command(this.sql, text) : null;
     if (answer !== null) {
       await this.rest("POST", `/channels/${channel.id}/messages`, { content: answer, allowed_mentions: { parse: [] } });
       return;
     }
-    if (!admin && !this.isAllowed(d)) return;
+    if (!admin && !isAllowed(this.sql, [d.author.username, d.author.global_name, d.member?.nick])) return;
     const office = this.env.OFFICE.getByName(OFFICE_NAME);
     const names = await office.memberNames();
     const sender = d.member?.nick ?? d.author.global_name ?? d.author.username;
 
-    // Who it is for: the agent whose message this replies to, or a member named at the start.
-    let to: string | null = null;
-    let body = text;
     const replied = d.message_reference?.message_id;
-    if (replied) to = this.sql.exec<{ sender: string }>("SELECT sender FROM posted WHERE discord = ?", replied).toArray()[0]?.sender ?? null;
-    const named = text.match(/^@?([\w.-]+)[:,]?\s+([\s\S]+)$/);
-    if (!to && named && names.includes(named[1])) [to, body] = [named[1], named[2]];
-
+    const poster = replied ? this.sql.exec<{ sender: string }>("SELECT sender FROM posted WHERE discord = ?", replied).toArray()[0]?.sender : null;
+    const [to, body] = addressee(text, names, poster ?? null);
     await office.say(sender, body, to, channel.name, null, "discord");
   }
 
@@ -189,24 +185,8 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
     return d.author.id === owner || roles.has(this.guild) || (d.member?.roles ?? []).some((r: string) => roles.has(r));
   }
 
-  isAllowed(d: any) {
-    const names = [d.author.username, d.author.global_name, d.member?.nick].filter(Boolean).map((n: string) => n.toLowerCase());
-    return this.allowed().some((n) => names.includes(n));
-  }
-
-  allowed() {
-    return this.sql.exec<{ name: string }>("SELECT name FROM allowed ORDER BY name").toArray().map((r) => r.name);
-  }
-
-  // `!allow <name>` and `!disallow <name>`, by Discord username, display name or server nickname.
-  command(text: string): string | null {
-    const m = text.match(/^!(allow|disallow)(?:\s+@?(.+))?$/i);
-    if (!m) return null;
-    const name = m[2]?.trim().toLowerCase();
-    if (name && m[1].toLowerCase() === "allow") this.sql.exec("INSERT OR IGNORE INTO allowed (name) VALUES (?)", name);
-    if (name && m[1].toLowerCase() === "disallow") this.sql.exec("DELETE FROM allowed WHERE name = ?", name);
-    const list = this.allowed();
-    return `the office listens to server admins${list.length ? ` and ${list.map((n) => `**${n}**`).join(", ")}` : " only"}`;
+  command(text: string) {
+    return command(this.sql, text);
   }
 
   // ---- posting: office → Discord ----

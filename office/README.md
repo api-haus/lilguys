@@ -38,3 +38,31 @@ The office hears only the server's admins (its owner and anyone holding a role w
 and the people they allow. An admin in any channel, or a person on the floor page, says
 `!allow <name>` or `!disallow <name>`, by Discord username, display name or server nickname; `!allow`
 alone lists who is allowed. Agents cannot allow anyone.
+
+## Telegram
+
+The office lays itself over one forum supergroup (a group with Topics on). A room is the topic of the
+same name, reception is General, and missing topics are created the first time something is said in
+them. The bot cannot post under another name, so every line it relays opens with the speaker's name
+in bold; replying to one of those lines, or starting a message with an agent's name, addresses that
+agent. The same rule as Discord decides who is heard: the group's admins, and whoever they `!allow`
+(Telegram's `/allow` works too).
+
+To connect a group:
+
+1. In [@BotFather](https://t.me/BotFather), `/newbot`, keep the token, then `/setprivacy` → the bot
+   → **Disable**, so it sees every message and not only commands.
+2. Make the group a forum: group settings → **Topics** on. Add the bot, then promote it to admin
+   with **Manage Topics**.
+3. Give the Worker the token and the group's chat id (a `-100…` number; forward a message from the
+   group to [@RawDataBot](https://t.me/RawDataBot), or read it off a `getUpdates` call before the
+   webhook is set):
+
+   ```bash
+   op read op://Personal/lilguys-office-telegram/credential | wrangler secret put TELEGRAM_TOKEN
+   op read op://Personal/lilguys-office-telegram/chat | wrangler secret put TELEGRAM_CHAT
+   ```
+
+4. `GET /telegram` (with the office token) points the bot's webhook at the Worker and reports the
+   bot, whether it reads all group messages, the webhook's last error, the known topics and who is
+   allowed.

@@ -2,10 +2,11 @@ import { DurableObject } from "cloudflare:workers";
 import page from "./floor.html";
 import { type Bridge, type Frame, type Message, OFFICE_NAME } from "./bridge";
 import { Discord, type DiscordEnv } from "./discord";
+import { Telegram, type TelegramEnv, webhookSecret } from "./telegram";
 
-export { Discord };
+export { Discord, Telegram };
 
-interface Env extends DiscordEnv {
+interface Env extends DiscordEnv, TelegramEnv {
   TOKEN: string;
 }
 
@@ -112,7 +113,11 @@ export class Office extends DurableObject<Env> {
 
   // Every messenger the office is laid over, by the name it signs its own messages with.
   bridges(): [string, Bridge][] {
-    return this.env.DISCORD_TOKEN && this.env.DISCORD_GUILD ? [["discord", this.env.DISCORD.getByName(this.env.DISCORD_GUILD)]] : [];
+    const { DISCORD_TOKEN, DISCORD_GUILD, TELEGRAM_TOKEN, TELEGRAM_CHAT } = this.env;
+    const all: [string, Bridge][] = [];
+    if (DISCORD_TOKEN && DISCORD_GUILD) all.push(["discord", this.env.DISCORD.getByName(DISCORD_GUILD)]);
+    if (TELEGRAM_TOKEN && TELEGRAM_CHAT) all.push(["telegram", this.env.TELEGRAM.getByName(TELEGRAM_CHAT)]);
+    return all;
   }
 
   relay(frame: Frame, origin?: string | null) {
@@ -258,6 +263,14 @@ export default {
     if (url.pathname === "/" && request.method === "GET") {
       return new Response(page, { headers: { "content-type": "text/html; charset=utf-8" } });
     }
+    if (url.pathname === "/telegram" && request.method === "POST") {
+      if (!env.TELEGRAM_TOKEN || !env.TELEGRAM_CHAT) return json({ error: "no Telegram group configured" }, 404);
+      if (request.headers.get("x-telegram-bot-api-secret-token") !== (await webhookSecret(env.TELEGRAM_TOKEN))) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      await env.TELEGRAM.getByName(env.TELEGRAM_CHAT).update(await request.json());
+      return json(undefined);
+    }
     const token = request.headers.get("authorization")?.replace(/^Bearer /, "") ?? url.searchParams.get("token");
     if (token !== env.TOKEN) return json({ error: "unauthorized" }, 401);
 
@@ -310,6 +323,9 @@ export default {
         const bridge = env.DISCORD.getByName(env.DISCORD_GUILD);
         const failed = await bridge.ensure().then(() => null, (e) => String(e));
         return json({ ...(await bridge.report()), ensure: failed });
+      case "GET /telegram":
+        if (!env.TELEGRAM_TOKEN || !env.TELEGRAM_CHAT) return json({ error: "no Telegram group configured" }, 404);
+        return json(await env.TELEGRAM.getByName(env.TELEGRAM_CHAT).hook(`${url.origin}/telegram`));
       case "GET /state":
         return json(await office.snapshot());
     }
