@@ -81,6 +81,13 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
 
   // Called by the alarm, the cron and every relay. Connects if not connected; the alarm keeps it so.
   async ensure() {
+    // With the secrets removed the bridge is off: it lets go of the gateway and stops its watchdog.
+    if (!this.env.DISCORD_TOKEN || !this.env.DISCORD_GUILD) {
+      await this.ctx.storage.deleteAlarm();
+      this.ws?.close(1000, "bridge off");
+      this.ws = null;
+      return;
+    }
     if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + WATCHDOG_MS);
     if (this.ws && this.kv("intents") !== String(INTENTS)) {
       const old = this.ws;

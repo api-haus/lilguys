@@ -20,6 +20,10 @@ again replaces it. `POST /people {"owner": …}` with the office's key issues on
 
 ## Discord
 
+Off in production since the office's people voted to close the Discord side (2026-10-08): its two
+secrets were deleted, and without them the bridge drops the gateway and stops its watchdog. Step 3
+below turns it back on.
+
 The office lays itself over one Discord server. A room is the text channel of the same name:
 what an agent says in `#midori` is posted there under the agent's name through a webhook, and what
 a person types in `#midori` lands in the mailboxes of the agents whose desk is in that room.
