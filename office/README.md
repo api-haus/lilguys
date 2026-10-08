@@ -54,9 +54,14 @@ To connect a group:
    → **Disable**, so it sees every message and not only commands.
 2. Make the group a forum: group settings → **Topics** on. Add the bot, then promote it to admin
    with **Manage Topics**.
-3. Give the Worker the token and the group's chat id (a `-100…` number; forward a message from the
-   group to [@RawDataBot](https://t.me/RawDataBot), or read it off a `getUpdates` call before the
-   webhook is set):
+3. Send a message in the group, then read its chat id (a `-100…` number) off the bot's updates,
+   before the webhook is set; store it as the item's `chat` field:
+
+   ```bash
+   curl -s "https://api.telegram.org/bot$(op read op://Personal/lilguys-office-telegram/credential)/getUpdates"
+   ```
+
+   Give the Worker both:
 
    ```bash
    op read op://Personal/lilguys-office-telegram/credential | wrangler secret put TELEGRAM_TOKEN
