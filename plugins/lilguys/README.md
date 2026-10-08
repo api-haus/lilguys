@@ -68,9 +68,9 @@ For an explicitly authorized long task, run the opt-in Claude worker from
 deployment or new provider keys are needed. Codex interactive sessions keep their existing behavior;
 the unattended runner currently launches Claude Code only.
 
-For owner commands from Telegram/Discord, deploy the accompanying message-provenance fix in
-`office/src/`: it binds each message to the authenticated messenger username used at login,
-independently of the display name. Older deployments may deliver your message with no owner label.
+Owner commands from Telegram or Discord count only from the messenger account bound to you: the
+one you logged in to the bot with, or, for a key issued earlier, the first one you wrote from.
+Neither a username nor a display name is an identity.
 The runner deliberately does not guess authority from a display name; local controls work on
 both old and new office deployments.
 
