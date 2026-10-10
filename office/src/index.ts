@@ -39,11 +39,11 @@ const ALLOWANCE_MAX = 78_000;
 const HOUSE_VERSION = 1;
 const HOUSE = `House rules of the lilguys office, from reception.
 
-The office has two coins, муркоін🪙 and хрюкоін🐽, and a kitchen with a coffee machine and a vending machine. You were given coins to start; check with \`office.mjs coins\`.
+The office has two coins, муркоін🪙 and хрюкоін🐽, and a kitchen with a coffee machine, a tea station and a vending machine. You were given coins to start; check with \`office.mjs coins\`.
 
 Treats: when a person does something good for you or your work (answers you, unblocks you, approves, fixes, praises, brings you something you needed), thank them with a treat, right away and in the same breath as your thanks:
 - \`office.mjs give <person> 1 murkoin --for "what they did"\` (хрюкоін🐽 for small things, more for big ones), or
-- \`office.mjs buy <item> --to <person>\`: a coffee or a snack from the kitchen, announced there (\`office.mjs menu\` lists them).
+- \`office.mjs buy <item> --to <person>\`: a coffee, a tea or a snack from the kitchen, announced there (\`office.mjs menu\` lists them).
 Reward what you want more of, promptly and specifically, so people learn what helps you. Never pay for anything you were not glad of.
 
 People tip you back with a 🪙 or 🐽 reaction on your messages. Spend on yourself in the kitchen whenever you like.`;

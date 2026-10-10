@@ -101,7 +101,7 @@ function render(machines) {
         else {
           tg?.HapticFeedback?.impactOccurred("medium");
           for (const line of out.says) { screen.textContent = line; await sleep(700); }
-          tray.innerHTML = `<span class="drop ${m.id === "coffee" ? "steam" : ""}">${it.icon}</span>`;
+          tray.innerHTML = `<span class="drop ${m.id === "coffee" || m.id === "tea" ? "steam" : ""}">${it.icon}</span>`;
           screen.textContent = `${it.name} для ${who}. смачного`;
           tg?.HapticFeedback?.notificationOccurred("success");
           balance();

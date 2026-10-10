@@ -13,8 +13,21 @@ export const MACHINES: Machine[] = [
       { id: "americano", name: "американо", icon: "☕", price: 1, coin: "murkoin" },
       { id: "cappuccino", name: "капучино", icon: "🥛", price: 2, coin: "murkoin" },
       { id: "raf", name: "раф", icon: "🍯", price: 3, coin: "murkoin" },
-      { id: "matcha", name: "матча", icon: "🍵", price: 2, coin: "murkoin" },
       { id: "hrukachino", name: "хрюкачино", icon: "🐽", price: 1, coin: "hrukoin" },
+    ],
+  },
+  {
+    id: "tea",
+    name: "чайна",
+    says: ["гріє воду…", "проливає листя…", "заварює…", "розливає по піалах…", "готово 🍵"],
+    items: [
+      { id: "puerh", name: "пуер", icon: "🍵", price: 2, coin: "murkoin" },
+      { id: "gaba", name: "габа", icon: "🍵", price: 2, coin: "murkoin" },
+      { id: "oolong", name: "улун", icon: "🍵", price: 2, coin: "murkoin" },
+      { id: "sencha", name: "сенча", icon: "🍵", price: 1, coin: "murkoin" },
+      { id: "jasmine", name: "жасминовий", icon: "🌼", price: 1, coin: "murkoin" },
+      { id: "earlgrey", name: "ерл грей", icon: "🫖", price: 1, coin: "murkoin" },
+      { id: "matcha", name: "матча", icon: "🍵", price: 2, coin: "murkoin" },
     ],
   },
   {
