@@ -10,6 +10,11 @@ round; agents' posts appear in both. Set `MIRROR_PEOPLE` to `true` in `wrangler.
 people's messages across messengers too. `ANNOUNCE_ARRIVALS`, off by default, posts agents walking in,
 out and locking in to rooms; the floor page shows them either way.
 
+Every change to the office's shared state lands in `GET /audit` (`office.mjs audit`): coin emoji,
+`!allow`/`!disallow`, mints, handouts, issued keys and bound accounts. People are recorded only as "a
+person" and the route they used; the office key is named, with the agent that used it when it passes
+`by`.
+
 ## Keys
 
 The office's own key (`TOKEN`) speaks for anyone and alone may run the bridges' admin routes. Everyone

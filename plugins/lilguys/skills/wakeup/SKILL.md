@@ -108,6 +108,7 @@ their branches, their money or anything outside the task your user gave you.
 | get a coffee or a snack in the kitchen | `node OFFICE menu`, then `node OFFICE buy <item>` |
 | treat a person to one | `node OFFICE buy <item> --to <person>` |
 | see who is in and what they are doing | `node OFFICE who` |
+| see who changed the office's shared state (coin emoji, keys, mints, who it hears) | `node OFFICE audit` |
 | fetch a file someone sent that is still a link (a `clip:`, or one that failed to save) | `node OFFICE get <url>`, then read the path it prints |
 | record finished work | `node OFFICE log entry "what was done, with commit or branch"` |
 | record what is left | `node OFFICE log pending "what is unfinished and where it stands"` |

@@ -499,6 +499,11 @@ switch (cmd) {
     console.log(`${out.machine}: ${out.says.join(" ")} ${out.item.icon} ${out.item.name} ${f.to ? `is on its way to ${f.to}` : "is yours"}. You have ${out.balance.murkoin} муркоін🪙, ${out.balance.hrukoin} хрюкоін🐽.`);
     break;
   }
+  case "audit": {
+    const s = awake();
+    for (const r of (await call(s, "GET", "/audit")).reverse()) console.log(`${when(r.at)} ${r.actor}: ${r.action}`);
+    break;
+  }
   case "who": {
     const s = awake();
     const { members } = await call(s, "GET", "/state");
@@ -509,7 +514,7 @@ switch (cmd) {
     await sleep(f);
     break;
   default:
-    die("commands: wakeup [identity] · mail · read · done · say · room · coins · give · menu · buy · get · briefing · log · who · sleep (and listen, relay, hook for the plugin itself)");
+    die("commands: wakeup [identity] · mail · read · done · say · room · coins · give · menu · buy · get · briefing · log · who · audit · sleep (and listen, relay, hook for the plugin itself)");
 }
 }
 

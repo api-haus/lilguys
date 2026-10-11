@@ -94,6 +94,7 @@ export class Office extends DurableObject<Env> {
         CREATE TABLE IF NOT EXISTS aliases (name TEXT PRIMARY KEY, owner TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS owners (owner TEXT PRIMARY KEY, icon TEXT NOT NULL UNIQUE);
         CREATE TABLE IF NOT EXISTS people (owner TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, issued INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL);
       `);
       // Databases created before the mailbox.
       try { this.sql.exec("ALTER TABLE messages ADD COLUMN brief TEXT NOT NULL DEFAULT ''"); } catch {}
@@ -104,6 +105,15 @@ export class Office extends DurableObject<Env> {
       for (const { owner } of this.sql.exec<{ owner: string }>("SELECT owner FROM members GROUP BY owner ORDER BY MIN(seen)").toArray()) this.icon(owner);
       this.sql.exec(`UPDATE messages SET brief = substr(text, 1, ${BRIEF_CHARS}) WHERE brief = ''`);
     });
+  }
+
+  // Who changed the office's shared state. People stay "a person"; agents and keys are named.
+  async audit(actor: string, action: string) {
+    this.sql.exec("INSERT INTO audit (at, actor, action) VALUES (?, ?, ?)", Date.now(), actor, action);
+  }
+
+  async audits(limit = 50) {
+    return this.sql.exec("SELECT at, actor, action FROM audit ORDER BY id DESC LIMIT ?", limit).toArray();
   }
 
   // A person's own key: a fresh one revokes the last. Only its hash is kept.
@@ -601,9 +611,16 @@ export default {
     const denied = (await forbidden(b.name, route === "POST /wakeup")) ?? (await forbidden(b.from));
     if (denied) return denied;
 
+    const keyHolder = `the office key${typeof b.by === "string" ? ` (${b.by})` : ""}`;
     switch (route) {
-      case "POST /people":
-        return missing("owner") ?? json({ owner: b.owner, token: await office.issue(b.owner) });
+      case "GET /audit":
+        return json(await office.audits());
+      case "POST /people": {
+        const err = missing("owner");
+        if (err) return err;
+        await office.audit(keyHolder, `issued a key for ${b.owner}`);
+        return json({ owner: b.owner, token: await office.issue(b.owner) });
+      }
       case "POST /wakeup":
         return missing("name", "harness") ?? json(await office.wakeup(b.name, owner ?? b.owner ?? "someone", b.harness, b.room));
       case "POST /say": {
@@ -652,17 +669,27 @@ export default {
         const out = await office.buy(b.name, b.item, b.for);
         return json(out, "error" in out ? 400 : 200);
       }
-      case "POST /account":
-        return missing("platform", "account", "owner") ?? json({ owner: await office.bindAccount(b.platform, b.account, b.owner) });
-      case "POST /alias":
-        return missing("name", "owner") ?? json(await office.linkName(b.name, b.owner));
+      case "POST /account": {
+        const err = missing("platform", "account", "owner");
+        if (err) return err;
+        await office.audit(keyHolder, `bound a ${b.platform} account to ${b.owner}`);
+        return json({ owner: await office.bindAccount(b.platform, b.account, b.owner) });
+      }
+      case "POST /alias": {
+        const err = missing("name", "owner");
+        if (err) return err;
+        await office.audit(keyHolder, `named ${b.name} as ${b.owner}'s`);
+        return json(await office.linkName(b.name, b.owner));
+      }
       case "POST /handout":
         if (!Number.isInteger(b.amount) || b.amount <= 0) return json({ error: "amount must be a whole number above zero" }, 400);
+        await office.audit(keyHolder, `handed out ${b.amount} of each coin to everyone`);
         return json(await office.handOut(b.amount, b.why ?? "роздача від офісу"));
       case "POST /mint": {
         const err = missing("to", "coin");
         if (err) return err;
         const out = await office.pay(b.coin, b.amount, null, b.to, b.why ?? "");
+        if (!("error" in out)) await office.audit(keyHolder, `minted ${b.amount} ${b.coin} to ${b.to}`);
         return json(out, "error" in out ? 400 : 200);
       }
       case "GET /coins":

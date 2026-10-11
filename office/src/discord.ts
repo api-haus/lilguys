@@ -193,6 +193,7 @@ export class Discord extends DurableObject<DiscordEnv> implements Bridge {
     if (!channel) return;
     const admin = await this.isAdmin(d.author.id, d.member?.roles ?? []);
     const answer = admin ? command(this.sql, text) : null;
+    if (answer !== null && /\s\S/.test(text)) await this.env.OFFICE.getByName(OFFICE_NAME).audit("a person (Discord admin)", text);
     if (answer !== null) {
       await this.rest("POST", `/channels/${channel.id}/messages`, { content: answer, allowed_mentions: { parse: [] } });
       return;

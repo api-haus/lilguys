@@ -114,6 +114,7 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     if (admin && /^[!/]emoji(?:@\w+)?(?:\s|$)/i.test(text)) return void (await this.send(await this.teach(msg), thread));
     if (/^[!/]kitchen(?:@\w+)?$/i.test(text)) return void (await this.kitchenButton(thread));
     const answer = admin ? command(this.sql, text) : null;
+    if (answer !== null && /\s\S/.test(text)) await this.env.OFFICE.getByName(OFFICE_NAME).audit("a person (Telegram admin)", text);
     if (answer !== null) return this.send(esc(answer), thread);
     const from = msg.from ?? {};
     const full = [from.first_name, from.last_name].filter(Boolean).join(" ");
@@ -176,7 +177,9 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
 
   // The group's own custom emoji stand in for plain ones in what the bot posts: `!emoji` followed by
   // custom emoji teaches it which, and the coins' are learned the first time anyone uses them.
-  learn_emoji(st: any) {
+  async learn_emoji(st: any, actor: string) {
+    const was = this.emojiFor(st.emoji)?.id;
+    await this.env.OFFICE.getByName(OFFICE_NAME).audit(actor, `${st.emoji} now posts as custom emoji ${st.custom_emoji_id}${was ? ` (was ${was})` : ""}`);
     this.sql.exec(
       "INSERT OR REPLACE INTO emoji (plain, id, still) VALUES (?, ?, ?)",
       st.emoji, st.custom_emoji_id, st.thumbnail?.file_id ?? (st.is_animated || st.is_video ? null : st.file_id),
@@ -191,7 +194,7 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     const ids = (msg.entities ?? []).filter((e: any) => e.type === "custom_emoji").map((e: any) => e.custom_emoji_id);
     if (!ids.length) return "send !emoji followed by the custom emoji to use, e.g. your 🪙 and 🐽";
     const stickers = await this.api<any[]>("getCustomEmojiStickers", { custom_emoji_ids: ids });
-    for (const st of stickers) if (st.emoji) this.learn_emoji(st);
+    for (const st of stickers) if (st.emoji) await this.learn_emoji(st, "a person (Telegram admin, !emoji)");
     return `the office now posts these as the group's own: ${stickers.map((st) => st.emoji).join(" ")}`;
   }
 
@@ -264,7 +267,7 @@ export class Telegram extends DurableObject<TelegramEnv> implements Bridge {
     if (!ids.length) return [];
     const stickers = await this.api<any[]>("getCustomEmojiStickers", { custom_emoji_ids: ids }).catch(() => []);
     const coins = Object.values(COINS).map((c) => c.icon as string);
-    for (const st of stickers) if (coins.includes(st.emoji) && !this.emojiFor(st.emoji)) this.learn_emoji(st);
+    for (const st of stickers) if (coins.includes(st.emoji) && !this.emojiFor(st.emoji)) await this.learn_emoji(st, "a person (Telegram, first use of a custom coin emoji)");
     return stickers.map((st) => this.picture(`custom emoji ${st.emoji ?? ""}`.trim(), st));
   }
 

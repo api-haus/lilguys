@@ -33,6 +33,7 @@ export async function coinCommand(office: DurableObjectStub<Office>, who: string
   if (!p || !coin) return `usage: !${verb} <name> <amount> <муркоін|хрюкоін> [why]`;
   if (verb === "mint" && !admin) return "only admins mint";
   const out = await office.pay(coin, Number(p[2]), verb === "mint" ? null : who, p[1], p[4] ?? "");
+  if (verb === "mint" && !("error" in out)) await office.audit("a person (messenger admin)", `minted ${p[2]} ${coin} to ${p[1]}`);
   return "error" in out ? out.error : `${verb === "mint" ? "minted" : `${who} gave`} ${show(coin, Number(p[2]))} to ${p[1]}`;
 }
 
